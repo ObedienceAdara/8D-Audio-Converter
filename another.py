@@ -36,10 +36,26 @@ class Audio8DConverter:
     def _check_ffmpeg(self) -> None:
         """Check if ffmpeg is installed and accessible."""
         try:
-            result = os.system("ffmpeg -version")
-            if result != 0:
-                raise RuntimeError("ffmpeg not found. Please install ffmpeg")
-            logger.info("FFmpeg is installed and accessible.")
+            # Try multiple possible ffmpeg paths
+            ffmpeg_paths = [
+                "ffmpeg",
+                "/usr/bin/ffmpeg",
+                "/usr/local/bin/ffmpeg",
+                "/opt/homebrew/bin/ffmpeg"
+            ]
+            
+            for path in ffmpeg_paths:
+                result = os.system(f"{path} -version > /dev/null 2>&1")
+                if result == 0:
+                    logger.info("FFmpeg is installed and accessible.")
+                    return
+    
+            raise RuntimeError(
+                "ffmpeg not found. Please install ffmpeg:\n"
+                "Windows: choco install ffmpeg\n"
+                "Mac: brew install ffmpeg\n"
+                "Linux: sudo apt-get install ffmpeg"
+            )
         except Exception as e:
             logger.error(f"FFmpeg check failed: {str(e)}")
             raise
