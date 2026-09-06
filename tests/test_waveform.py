@@ -10,7 +10,7 @@ def test_waveform_returns_peak_envelope():
     assert envelope == pytest.approx([0.25, 0.75, 1.0])
 
 
-def test_waveform_accepts_stereo_and_empty_input():
+def test_waveform_uses_peak_across_stereo_channels_and_handles_empty_input():
     stereo = np.array([[0.1, -0.2], [0.5, 0.4], [-0.8, 0.1]], dtype=np.float32)
-    assert summarize_waveform(stereo, points=2) == pytest.approx([0.15, 0.45])
+    assert summarize_waveform(stereo, points=2) == pytest.approx([0.2, 0.8])
     assert summarize_waveform(np.array([], dtype=np.float32)) == []
