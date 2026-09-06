@@ -15,7 +15,7 @@ from ..domain.models import PipelineArtifacts
 from ..effects.reverb import RoomReverb
 from ..processing.loudness import LoudnessController
 from ..processing.quality import QualityAnalyzer
-from ..processing.report import write_quality_report
+from ..processing.report import write_quality_html, write_quality_report
 from ..spatial.engine import SpatialEngine
 
 ProgressCallback = Callable[[int, str], None]
@@ -101,6 +101,7 @@ class AudioPipeline:
         )
         final_output = Path(output_path)
         report_path = write_quality_report(report, final_output.with_suffix(final_output.suffix + ".quality.json"))
+        report_html_path = write_quality_html(report, final_output.with_suffix(final_output.suffix + ".quality.html"))
         metrics: dict = {
             "duration_seconds": round(controlled.shape[0] / source.sample_rate, 4),
             "sample_rate": int(source.sample_rate),
@@ -133,4 +134,5 @@ class AudioPipeline:
             metadata=metadata,
             waveform=waveform,
             quality_report_path=report_path,
+            quality_report_html_path=report_html_path,
         )
