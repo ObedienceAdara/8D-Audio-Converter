@@ -14,7 +14,9 @@ dependencies = [
   "Gunicorn>=21,<24",
   "NumPy>=1.26,<3",
   "SciPy>=1.11,<2",
+  "h5py>=3.10,<4",
   "pydub>=0.25,<1",
+  "pyloudnorm>=0.2,<0.3",
   "Werkzeug>=3.0,<4",
 ]
 
