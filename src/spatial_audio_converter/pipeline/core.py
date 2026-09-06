@@ -22,7 +22,7 @@ ProgressCallback = Callable[[int, str], None]
 
 
 class AudioPipeline:
-    """Orchestrate decode → binaural spatialization → room → loudness → QA → encode."""
+    """Orchestrate decode → spatial → room → loudness → encode → objective QA."""
 
     def __init__(self, options: PipelineOptions | None = None) -> None:
         self.options = options or PipelineOptions()
@@ -48,6 +48,7 @@ class AudioPipeline:
     ) -> PipelineArtifacts:
         self._report(progress_callback, 2, "Decoding input")
         source = self.decoder.decode(input_path, config.max_duration_seconds)
+
         self._report(progress_callback, 12, "Analyzing source")
         analysis = self.analyzer.analyze(source) if self.options.analysis_enabled else None
         metadata = self.metadata.extract(source, input_path) if self.options.metadata_enabled else {}
@@ -85,10 +86,19 @@ class AudioPipeline:
         result_buffer = spatial.copy()
         result_buffer.samples = controlled
 
-        self._report(progress_callback, 84, "Computing quality report")
+        self._report(progress_callback, 84, "Encoding output")
+        final_path = self.encoder.encode(
+            result_buffer,
+            output_path,
+            config.output_format,
+            bitrate=config.output_bitrate,
+        )
+
+        self._report(progress_callback, 94, "Analyzing rendered output")
+        rendered = self.decoder.decode(final_path, config.max_duration_seconds)
         report = self.quality.automated_report(
             source.samples,
-            controlled,
+            rendered.samples,
             source.sample_rate,
             context={
                 "renderer": "binaural-hrtf" if config.spatial_mode == "binaural" else "equal-power+ild+itd",
@@ -96,17 +106,18 @@ class AudioPipeline:
                 "room_model": room.last_diagnostics.get("model", config.room_model),
                 "room_diagnostics": room.last_diagnostics,
                 "headphone_mode": config.headphone_mode,
+                "encoded_format": config.output_format,
             },
         )
-        final_output = Path(output_path)
+        final_output = Path(final_path)
         report_path = write_quality_report(report, final_output.with_suffix(final_output.suffix + ".quality.json"))
         report_html_path = write_quality_html(report, final_output.with_suffix(final_output.suffix + ".quality.html"))
         metrics: dict = {
-            "duration_seconds": round(controlled.shape[0] / source.sample_rate, 4),
-            "sample_rate": int(source.sample_rate),
+            "duration_seconds": round(rendered.frames / rendered.sample_rate, 4),
+            "sample_rate": int(rendered.sample_rate),
             "input_frames": int(source.frames),
-            "output_frames": int(controlled.shape[0]),
-            "clipped_samples": int(np.count_nonzero(np.abs(controlled) >= 0.99999)),
+            "output_frames": int(rendered.frames),
+            "clipped_samples": int(np.count_nonzero(np.abs(rendered.samples) >= 0.99999)),
             "renderer": report["context"]["renderer"],
             "hrtf_source": report["context"]["hrtf_source"],
             "room_model": report["context"]["room_model"],
@@ -118,14 +129,7 @@ class AudioPipeline:
         metrics.update({f"after_{key}": value for key, value in report["after"].items() if not isinstance(value, (dict, list))})
         metrics["comparison"] = report["comparison"]
 
-        self._report(progress_callback, 93, "Encoding output")
-        final_path = self.encoder.encode(
-            result_buffer,
-            output_path,
-            config.output_format,
-            bitrate=config.output_bitrate,
-        )
-        waveform = summarize_waveform(controlled)
+        waveform = summarize_waveform(rendered.samples)
         self._report(progress_callback, 100, "Complete")
         return PipelineArtifacts(
             str(final_path),
