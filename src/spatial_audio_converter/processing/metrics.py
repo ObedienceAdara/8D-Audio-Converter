@@ -2,30 +2,40 @@ from __future__ import annotations
 
 import numpy as np
 
+from .quality import QualityAnalyzer
+
 
 class QualityMetrics:
-    """Compute compact objective measurements for processed audio."""
+    """Backward-compatible facade over the Phase-5 quality analyzer."""
 
-    def compute(self, before: np.ndarray, after: np.ndarray, sample_rate: int) -> dict[str, float | int]:
-        peak = float(np.max(np.abs(after))) if after.size else 0.0
-        rms = float(np.sqrt(np.mean(np.square(after)))) if after.size else 0.0
-        clipping = int(np.count_nonzero(np.abs(after) >= 0.99999))
-        correlation = 1.0
-        if (
-            after.ndim == 2
-            and after.shape[1] >= 2
-            and len(after) > 1
-            and np.std(after[:, 0]) > 1e-12
-            and np.std(after[:, 1]) > 1e-12
-        ):
-            correlation = float(np.corrcoef(after[:, 0], after[:, 1])[0, 1])
-        return {
-            "duration_seconds": round(len(after) / sample_rate, 4),
-            "sample_rate": int(sample_rate),
-            "peak_dbfs": round(20.0 * np.log10(max(peak, 1e-12)), 3),
-            "rms_dbfs": round(20.0 * np.log10(max(rms, 1e-12)), 3),
-            "stereo_correlation": round(correlation, 6),
-            "clipped_samples": clipping,
-            "input_frames": len(before),
-            "output_frames": len(after),
-        }
+    def __init__(self) -> None:
+        self.analyzer = QualityAnalyzer()
+
+    def compute(self, before: np.ndarray, after: np.ndarray, sample_rate: int) -> dict[str, object]:
+        report = self.analyzer.automated_report(before, after, sample_rate)
+        result = dict(report["after"])
+        comparison = report["comparison"]
+        result.update(
+            {
+                "stereo_correlation": self._stereo_correlation(after),
+                "clipped_samples": int(np.count_nonzero(np.abs(after) >= 0.99999)),
+                "input_frames": int(len(before)),
+                "output_frames": int(len(after)),
+                "snr_db": comparison.get("snr_db"),
+                "downmix_snr_db": comparison.get("downmix_snr_db"),
+                "spectral_distance_rmse_db": comparison.get("spectral_distance_rmse_db"),
+                "frequency_response": result.get("frequency_response"),
+            }
+        )
+        return result
+
+    @staticmethod
+    def _stereo_correlation(audio: np.ndarray) -> float:
+        x = np.asarray(audio)
+        if x.ndim != 2 or x.shape[1] < 2 or len(x) <= 1:
+            return 1.0
+        left = x[:, 0]
+        right = x[:, 1]
+        if np.std(left) <= 1e-12 or np.std(right) <= 1e-12:
+            return 1.0
+        return round(float(np.corrcoef(left, right)[0, 1]), 6)
