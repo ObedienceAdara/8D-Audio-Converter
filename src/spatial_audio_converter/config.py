@@ -21,6 +21,7 @@ class AudioProcessingConfig:
     room_damping: float = 0.35
     room_model: RoomModel = "schroeder-moorer"
     room_ir_path: str | None = None
+    room_enabled: bool = True
     target_rms_db: float = -18.0
     limiter_db: float = -1.0
     output_format: OutputFormat = "mp3"
@@ -49,6 +50,8 @@ class AudioProcessingConfig:
             raise ValueError("room_damping must be in [0, 1].")
         if self.room_model not in {"schroeder-moorer", "measured-wav", "early-reflections"}:
             raise ValueError("unsupported room_model")
+        if self.room_model == "measured-wav" and not self.room_ir_path:
+            raise ValueError("room_ir_path is required when room_model='measured-wav'.")
         if not -60 <= self.target_rms_db <= 0:
             raise ValueError("target_rms_db must be in [-60, 0].")
         if not -20 <= self.limiter_db <= 0:
