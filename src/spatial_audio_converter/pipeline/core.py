@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..config import AudioProcessingConfig, PipelineOptions
 from ..analysis.signal import SignalAnalyzer
 from ..audio.decoder import AudioDecoder
 from ..audio.encoder import AudioEncoder
 from ..audio.metadata import MetadataExtractor
+from ..config import AudioProcessingConfig, PipelineOptions
 from ..domain.models import PipelineArtifacts
 from ..effects.reverb import RoomReverb
 from ..processing.loudness import LoudnessController
@@ -54,9 +54,10 @@ class AudioPipeline:
         result_buffer = spatial.copy()
         result_buffer.samples = controlled
 
-        metrics = self.metrics.compute(source.samples[:, :2] if source.channels >= 2 else source.samples, controlled, source.sample_rate)
+        reference = source.samples[:, :2] if source.channels >= 2 else source.samples
+        metrics = self.metrics.compute(reference, controlled, source.sample_rate)
         if analysis:
-            metrics.update({f"input_{k}": v for k, v in analysis.as_dict().items()})
+            metrics.update({f"input_{key}": value for key, value in analysis.as_dict().items()})
 
         final_path = self.encoder.encode(
             result_buffer,
