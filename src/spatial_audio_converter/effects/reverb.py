@@ -68,6 +68,8 @@ class RoomReverb:
 
     def _algorithmic_ir(self, sample_rate: int, delay_ms: int, decay: float, room_size: float, damping: float) -> np.ndarray:
         early = self._early_ir(sample_rate, delay_ms, decay, room_size)
+        if self.room_model == "early-reflections":
+            return early
         scale = 0.65 + 1.35 * room_size
         delays_ms = (29.7, 37.1, 41.1, 43.7)
         delays = [max(1, int(sample_rate * ms * scale / 1000)) for ms in delays_ms]
@@ -77,11 +79,10 @@ class RoomReverb:
         late = np.zeros(length, dtype=np.float32)
         for delay, gain in zip(delays, gains):
             late += self._comb_ir(length, delay, gain * max(0.05, decay))
-        late /= max(len(delays), 1)
+        late /= len(delays)
         damping_alpha = min(0.995, max(0.05, 0.50 + 0.45 * damping))
         late = lfilter([1.0 - damping_alpha], [1.0, -damping_alpha], late).astype(np.float32)
         late = self._allpass(late, max(1, int(sample_rate * 5.0 / 1000)), min(0.7, 0.35 + 0.25 * decay))
-
         ir = np.zeros((length, 2), dtype=np.float32)
         ir[: len(early)] += early
         ir[:, 0] += 0.70 * late
@@ -97,24 +98,26 @@ class RoomReverb:
         mix: float,
         room_size: float = 0.7,
         damping: float = 0.35,
+        room_model: str = "schroeder-moorer",
     ) -> np.ndarray:
         dry = np.asarray(stereo, dtype=np.float32)
         if dry.ndim != 2 or dry.shape[1] != 2:
             raise ValueError("RoomReverb expects stereo audio with shape (frames, 2).")
+        self.room_model = room_model
         if mix <= 0 or decay <= 0:
             self.last_diagnostics = {"model": "disabled", "ir_duration_seconds": 0.0}
             return dry.copy()
-
-        if self.room_ir_path:
+        if room_model == "measured-wav":
+            if not self.room_ir_path:
+                raise ValueError("room_ir_path is required for measured-wav room model")
             ir = self._load_measured_ir(self.room_ir_path, sample_rate)
             model = "measured-wav-ir"
         else:
             ir = self._algorithmic_ir(sample_rate, delay_ms, decay, room_size, damping)
-            model = "schroeder-moorer"
+            model = room_model
         peak = float(np.max(np.abs(ir))) if ir.size else 1.0
         if peak > 1e-9:
             ir = ir / peak
-
         wet = np.zeros((len(dry) + len(ir) - 1, 2), dtype=np.float32)
         for channel in range(2):
             wet[:, channel] = fftconvolve(dry[:, channel], ir[:, channel], mode="full")
