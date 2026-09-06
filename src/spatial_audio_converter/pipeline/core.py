@@ -64,10 +64,10 @@ class AudioPipeline:
             hrtf_path=hrtf_path,
         )
 
-        self._report(progress_callback, 55, "Applying room simulation")
         room = RoomReverb(config.room_ir_path if config.room_model == "measured-wav" else None)
-        effected = (
-            room.process(
+        if config.room_enabled and config.reverb_mix > 0:
+            self._report(progress_callback, 55, "Applying room simulation")
+            effected = room.process(
                 spatial.samples,
                 spatial.sample_rate,
                 config.reverb_delay_ms,
@@ -75,10 +75,11 @@ class AudioPipeline:
                 config.reverb_mix,
                 config.room_size,
                 config.room_damping,
+                config.room_model,
             )
-            if config.room_model != "early-reflections" or config.reverb_mix > 0
-            else spatial.samples.copy()
-        )
+        else:
+            room.last_diagnostics = {"model": "disabled", "ir_duration_seconds": 0.0}
+            effected = spatial.samples.copy()
 
         self._report(progress_callback, 72, "Loudness control")
         controlled = self.loudness.process(effected, config.target_rms_db, config.limiter_db)
@@ -93,14 +94,14 @@ class AudioPipeline:
             context={
                 "renderer": "binaural-hrtf" if config.spatial_mode == "binaural" else "equal-power+ild+itd",
                 "hrtf_source": self.spatial.hrtf_source if config.spatial_mode == "binaural" else "not-used",
-                "room_model": config.room_model,
+                "room_model": room.last_diagnostics.get("model", config.room_model),
                 "room_diagnostics": room.last_diagnostics,
                 "headphone_mode": config.headphone_mode,
             },
         )
         final_output = Path(output_path)
         report_path = write_quality_report(report, final_output.with_suffix(final_output.suffix + ".quality.json"))
-        metrics = {
+        metrics: dict = {
             "duration_seconds": round(controlled.shape[0] / source.sample_rate, 4),
             "sample_rate": int(source.sample_rate),
             "input_frames": int(source.frames),
@@ -127,5 +128,9 @@ class AudioPipeline:
         waveform = summarize_waveform(controlled)
         self._report(progress_callback, 100, "Complete")
         return PipelineArtifacts(
-            str(final_path), metrics=metrics, metadata=metadata, waveform=waveform, quality_report_path=report_path
+            str(final_path),
+            metrics=metrics,
+            metadata=metadata,
+            waveform=waveform,
+            quality_report_path=report_path,
         )
