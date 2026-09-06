@@ -63,6 +63,10 @@ class AudioPipeline:
             use_hrtf=use_binaural_hrtf,
             headphone_mode=use_binaural_hrtf and config.headphone_mode,
             hrtf_path=hrtf_path,
+            interpolation_quality=config.hrtf_interpolation_quality,
+            interpolation_neighbors=config.hrtf_interpolation_neighbors,
+            filter_crossfade_blocks=config.hrtf_filter_crossfade_blocks,
+            trajectory_smoothing=config.hrtf_trajectory_smoothing,
         )
 
         room = RoomReverb(config.room_ir_path if config.room_model == "measured-wav" else None)
@@ -100,10 +104,14 @@ class AudioPipeline:
         report = self.quality.automated_report(
             source.samples,
             rendered.samples,
-            source.sample_rate,
+            rendered.sample_rate,
             context={
                 "renderer": "binaural-hrtf" if use_binaural_hrtf else "equal-power+ild+itd",
                 "hrtf_source": self.spatial.hrtf_source if use_binaural_hrtf else "not-used",
+                "hrtf_interpolation_quality": config.hrtf_interpolation_quality if use_binaural_hrtf else "not-used",
+                "hrtf_interpolation_neighbors": config.hrtf_interpolation_neighbors if use_binaural_hrtf else 0,
+                "hrtf_filter_crossfade_blocks": config.hrtf_filter_crossfade_blocks if use_binaural_hrtf else 0,
+                "hrtf_trajectory_smoothing": config.hrtf_trajectory_smoothing if use_binaural_hrtf else 0.0,
                 "room_model": room.last_diagnostics.get("model", config.room_model),
                 "room_diagnostics": room.last_diagnostics,
                 "headphone_mode": bool(use_binaural_hrtf and config.headphone_mode),
@@ -121,6 +129,7 @@ class AudioPipeline:
             "clipped_samples": int(np.count_nonzero(np.abs(rendered.samples) >= 0.99999)),
             "renderer": report["context"]["renderer"],
             "hrtf_source": report["context"]["hrtf_source"],
+            "hrtf_interpolation_quality": report["context"]["hrtf_interpolation_quality"],
             "room_model": report["context"]["room_model"],
             "output_format": config.output_format,
             "quality_report": report,
