@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,6 +20,9 @@ class JobRecord:
     filename: str
     output_path: str | None = None
     metrics: dict | None = None
+    waveform: list[float] = field(default_factory=list)
+    quality_report_path: str | None = None
+    quality_report_html_path: str | None = None
     error: str | None = None
     future: Future | None = None
 
@@ -31,6 +34,9 @@ class JobRecord:
             "filename": self.filename,
             "output_path": self.output_path,
             "metrics": self.metrics or {},
+            "waveform": self.waveform,
+            "quality_report_path": self.quality_report_path,
+            "quality_report_html_path": self.quality_report_html_path,
             "error": self.error,
         }
 
@@ -78,8 +84,15 @@ class JobManager:
             artifacts = self.pipeline.run(source_path, output_path, config)
             record.output_path = artifacts.output_path
             record.metrics = artifacts.metrics
+            record.waveform = artifacts.waveform
+            record.quality_report_path = artifacts.quality_report_path
+            record.quality_report_html_path = artifacts.quality_report_html_path
             record.status = "completed"
             self.storage.schedule_remove(artifacts.output_path)
+            if artifacts.quality_report_path:
+                self.storage.schedule_remove(artifacts.quality_report_path)
+            if artifacts.quality_report_html_path:
+                self.storage.schedule_remove(artifacts.quality_report_html_path)
         except Exception as exc:  # noqa: BLE001 - worker boundary records all processing failures
             record.error = str(exc)
             record.status = "failed"
