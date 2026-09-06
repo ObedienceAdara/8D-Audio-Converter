@@ -59,7 +59,7 @@ class AudioBuffer:
     def duration_seconds(self) -> float:
         return self.frames / self.sample_rate
 
-    def copy(self) -> "AudioBuffer":
+    def copy(self) -> AudioBuffer:
         return AudioBuffer(self.samples.copy(), self.sample_rate, self.metadata)
 
 
