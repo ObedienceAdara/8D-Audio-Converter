@@ -84,16 +84,22 @@ class RoomReverb:
         late /= len(delays)
         damping_alpha = min(0.995, max(0.05, 0.50 + 0.45 * damping))
         late = lfilter([1.0 - damping_alpha], [1.0, -damping_alpha], late).astype(np.float32)
-        late = self._allpass(
-            late,
-            max(1, int(sample_rate * 5.0 / 1000)),
-            min(0.7, 0.35 + 0.25 * effective_decay),
-        )
+        late = self._allpass(late, max(1, int(sample_rate * 5.0 / 1000)), min(0.7, 0.35 + 0.25 * effective_decay))
         ir = np.zeros((length, 2), dtype=np.float32)
         ir[: len(early)] += early
         ir[:, 0] += 0.70 * late
         ir[:, 1] += 0.82 * late
         return ir
+
+    @staticmethod
+    def _block_convolve(signal: np.ndarray, impulse_response: np.ndarray, block_size: int = 8192) -> np.ndarray:
+        output = np.zeros(len(signal), dtype=np.float32)
+        for start in range(0, len(signal), block_size):
+            stop = min(start + block_size, len(signal))
+            response = fftconvolve(signal[start:stop], impulse_response, mode="full")
+            end = min(len(output), start + len(response))
+            output[start:end] += response[: end - start]
+        return output
 
     def process(
         self,
@@ -124,10 +130,9 @@ class RoomReverb:
         peak = float(np.max(np.abs(ir))) if ir.size else 1.0
         if peak > 1e-9:
             ir = ir / peak
-        wet = np.zeros((len(dry) + len(ir) - 1, 2), dtype=np.float32)
-        for channel in range(2):
-            wet[:, channel] = fftconvolve(dry[:, channel], ir[:, channel], mode="full")
-        wet = wet[: len(dry)]
+        wet = np.column_stack(
+            [self._block_convolve(dry[:, channel], ir[:, channel]) for channel in range(2)]
+        )
         self.last_diagnostics = {
             "model": model,
             "ir_length_samples": int(len(ir)),
