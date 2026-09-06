@@ -55,12 +55,13 @@ class AudioPipeline:
 
         self._report(progress_callback, 22, "Binaural HRTF rendering")
         hrtf_path = config.hrtf_sofa_path if config.hrtf_source == "sofa" else None
+        use_binaural_hrtf = config.hrtf_enabled and config.spatial_mode == "binaural"
         spatial = self.spatial.process(
             source,
             config.pan_speed_hz,
             config.depth,
-            use_hrtf=config.hrtf_enabled and config.spatial_mode == "binaural",
-            headphone_mode=config.headphone_mode and config.spatial_mode == "binaural",
+            use_hrtf=use_binaural_hrtf,
+            headphone_mode=use_binaural_hrtf and config.headphone_mode,
             hrtf_path=hrtf_path,
         )
 
@@ -101,11 +102,11 @@ class AudioPipeline:
             rendered.samples,
             source.sample_rate,
             context={
-                "renderer": "binaural-hrtf" if config.spatial_mode == "binaural" else "equal-power+ild+itd",
-                "hrtf_source": self.spatial.hrtf_source if config.spatial_mode == "binaural" else "not-used",
+                "renderer": "binaural-hrtf" if use_binaural_hrtf else "equal-power+ild+itd",
+                "hrtf_source": self.spatial.hrtf_source if use_binaural_hrtf else "not-used",
                 "room_model": room.last_diagnostics.get("model", config.room_model),
                 "room_diagnostics": room.last_diagnostics,
-                "headphone_mode": config.headphone_mode,
+                "headphone_mode": bool(use_binaural_hrtf and config.headphone_mode),
                 "encoded_format": config.output_format,
             },
         )
