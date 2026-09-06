@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
 import threading
 import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 
 from ..config import AudioProcessingConfig
 from ..pipeline.core import AudioPipeline
@@ -36,13 +36,14 @@ class JobRecord:
 
 
 class JobManager:
-    """Manage bounded in-process conversion jobs.
+    """Manage bounded in-process conversion jobs."""
 
-    The interface is intentionally independent of the execution backend so a
-    Redis/Celery/RQ worker pool can replace this implementation later.
-    """
-
-    def __init__(self, pipeline: AudioPipeline | None = None, storage: LocalStorage | None = None, max_workers: int = 2) -> None:
+    def __init__(
+        self,
+        pipeline: AudioPipeline | None = None,
+        storage: LocalStorage | None = None,
+        max_workers: int = 2,
+    ) -> None:
         self.pipeline = pipeline or AudioPipeline()
         self.storage = storage or LocalStorage()
         self.executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="audio-worker")
@@ -56,16 +57,21 @@ class JobManager:
         record = JobRecord(
             id=job_id,
             status="queued",
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             filename=filename,
         )
         with self.lock:
             self.jobs[job_id] = record
-        future = self.executor.submit(self._run, record, source_path, output_path, config)
-        record.future = future
+        record.future = self.executor.submit(self._run, record, source_path, output_path, config)
         return record
 
-    def _run(self, record: JobRecord, source_path: Path, output_path: Path, config: AudioProcessingConfig) -> None:
+    def _run(
+        self,
+        record: JobRecord,
+        source_path: Path,
+        output_path: Path,
+        config: AudioProcessingConfig,
+    ) -> None:
         with self.lock:
             record.status = "processing"
         try:
@@ -74,7 +80,7 @@ class JobManager:
             record.metrics = artifacts.metrics
             record.status = "completed"
             self.storage.schedule_remove(artifacts.output_path)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - worker boundary records all processing failures
             record.error = str(exc)
             record.status = "failed"
         finally:

@@ -21,7 +21,9 @@ class AudioProcessingConfig:
     output_bitrate: str = "320k"
     max_duration_seconds: int = 900
     room_enabled: bool = True
-    hrtf_enabled: bool = True
+    # The validated Phase-2 baseline is equal-power panning + explicit ILD/ITD.
+    # The analytic HRTF approximation remains opt-in until measured HRTFs exist.
+    hrtf_enabled: bool = False
 
     def __post_init__(self) -> None:
         if not 0 < self.pan_speed_hz <= 2.0:

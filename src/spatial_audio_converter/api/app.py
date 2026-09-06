@@ -9,7 +9,6 @@ from werkzeug.utils import secure_filename
 from ..config import AudioProcessingConfig
 from ..jobs.manager import JobManager
 
-
 MAX_UPLOAD_BYTES = 32 * 1024 * 1024
 ALLOWED_INPUTS = {"mp3", "wav", "flac", "ogg", "m4a", "aac"}
 
@@ -48,7 +47,7 @@ def create_app(job_manager: JobManager | None = None) -> Flask:
                 output_format=request.form.get("output_format", "mp3"),
                 output_bitrate=request.form.get("output_bitrate", "320k"),
                 room_enabled=request.form.get("room_enabled", "true").lower() == "true",
-                hrtf_enabled=request.form.get("hrtf_enabled", "true").lower() == "true",
+                hrtf_enabled=request.form.get("hrtf_enabled", "false").lower() == "true",
             )
         except (TypeError, ValueError) as exc:
             return jsonify({"error": str(exc)}), 400
