@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from flask import Flask, jsonify, render_template, request, send_file
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
+from ..analysis.signal import SignalAnalyzer
+from ..audio.decoder import AudioDecoder
+from ..audio.encoder import AudioEncoder
+from ..audio.metadata import MetadataExtractor
 from ..config import AudioProcessingConfig
+from ..domain.models import AudioBuffer
 from ..jobs.manager import JobManager
-
 
 MAX_UPLOAD_BYTES = 32 * 1024 * 1024
 ALLOWED_INPUTS = {"mp3", "wav", "flac", "ogg", "m4a", "aac"}
@@ -71,8 +77,6 @@ def create_app(job_manager: JobManager | None = None) -> Flask:
             return jsonify({"error": "Job not found."}), 404
         if record.status != "completed" or not record.output_path:
             return jsonify({"error": "Output is not ready."}), 409
-        from pathlib import Path
-
         output = Path(record.output_path)
         if not output.exists():
             return jsonify({"error": "Output artifact has expired."}), 410
