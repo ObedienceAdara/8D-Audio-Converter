@@ -42,7 +42,7 @@ class SpatialEngine:
         speed_hz: float,
         depth: float,
         use_hrtf: bool = False,
-        headphone_mode: bool = True,
+        headphone_mode: bool = False,
         hrtf_path: str | None = None,
     ) -> AudioBuffer:
         mono = audio.samples[:, 0] if audio.channels == 1 else np.mean(audio.samples[:, :2], axis=1)
