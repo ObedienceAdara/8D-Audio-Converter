@@ -50,6 +50,10 @@ def _config_from_form(form) -> AudioProcessingConfig:
         "headphone_mode": _parse_bool,
         "hrtf_source": str,
         "hrtf_sofa_path": str,
+        "hrtf_interpolation_quality": str,
+        "hrtf_interpolation_neighbors": int,
+        "hrtf_filter_crossfade_blocks": int,
+        "hrtf_trajectory_smoothing": float,
     }
     for key, caster in casts.items():
         raw = form.get(key)
