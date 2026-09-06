@@ -85,3 +85,12 @@ class SignalAnalysis:
             "crest_factor_db": round(self.crest_factor_db, 3),
             "stereo_correlation": round(self.stereo_correlation, 6),
         }
+
+
+@dataclass(slots=True)
+class PipelineArtifacts:
+    """Artifacts and measurements produced by a completed pipeline run."""
+
+    output_path: str
+    metrics: dict[str, float | int | str] = field(default_factory=dict)
+    metadata: dict[str, str] = field(default_factory=dict)
