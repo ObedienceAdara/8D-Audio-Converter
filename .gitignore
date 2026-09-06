@@ -1,23 +1,30 @@
-```gitignore
-# Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Virtual environments
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
 .venv/
 venv/
 env/
-
-# Dependencies
-pip-selfcheck.json
-
-# Logs
-*.log
-
-# Environment variables
 .env
-.env.local
 .env.*
-```
+*.log
+.DS_Store
+.idea/
+.vscode/
+
+# Local audio artifacts
+/data/
+/tmp/
+uploads/
+processed/
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+*.aac
+
+# Build artifacts
+build/
+dist/

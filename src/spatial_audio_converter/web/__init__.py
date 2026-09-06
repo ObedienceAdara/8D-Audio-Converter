@@ -1,0 +1,1 @@
+# Web templates and static assets live in this package tree.
