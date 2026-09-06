@@ -69,6 +69,8 @@ class JobManager:
         queue_size: int = 64,
         queue: InProcessJobQueue[ConversionTask] | None = None,
     ) -> None:
+        if max_workers <= 0:
+            raise ValueError("max_workers must be positive")
         self.pipeline = pipeline or AudioPipeline()
         self.storage = storage or LocalStorage()
         self.queue = queue or InProcessJobQueue[ConversionTask](maxsize=queue_size)
@@ -125,6 +127,10 @@ class JobManager:
         items: list[tuple[BinaryIO, str]],
         config: AudioProcessingConfig,
     ) -> BatchRecord:
+        if not items:
+            raise ValueError("batch must contain at least one file")
+        if len(items) > self.queue.maxsize:
+            raise QueueFullError("Batch exceeds the configured queue capacity.")
         batch = BatchRecord(
             id=uuid.uuid4().hex,
             created_at=datetime.now(UTC).isoformat(),
