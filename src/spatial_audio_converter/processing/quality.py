@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pyloudnorm as pyln
-from scipy.signal import resample_poly, sosfilt
-
+from scipy.signal import resample_poly
 
 EPS = 1e-12
 
@@ -31,8 +30,7 @@ def _spectral_summary(audio: np.ndarray, sample_rate: int) -> dict[str, float]:
         x = np.mean(x, axis=1)
     if not x.size:
         return {"spectral_centroid_hz": 0.0, "spectral_rolloff_hz": 0.0}
-    window = np.hanning(len(x))
-    spectrum = np.abs(np.fft.rfft(x * window))
+    spectrum = np.abs(np.fft.rfft(x * np.hanning(len(x))))
     frequencies = np.fft.rfftfreq(len(x), 1.0 / sample_rate)
     total = float(np.sum(spectrum))
     centroid = float(np.sum(frequencies * spectrum) / max(total, EPS))
@@ -62,25 +60,8 @@ def _band_energies(audio: np.ndarray, sample_rate: int) -> dict[str, float]:
     return result
 
 
-def _k_weighted(audio: np.ndarray, sample_rate: int) -> np.ndarray:
-    """Independent K-weighting helper for diagnostic plots/checks."""
-    x = np.asarray(audio, dtype=np.float64)
-    if x.ndim == 1:
-        x = x[:, None]
-    # pyloudnorm is the reference measurement implementation; this helper uses
-    # equivalent K-weighting configuration when per-sample diagnostics are useful.
-    meter = pyln.Meter(sample_rate)
-    filtered = np.empty_like(x)
-    for channel in range(x.shape[1]):
-        stage = meter._filters
-        filtered[:, channel] = x[:, channel]
-        for filt in stage.values():
-            filtered[:, channel] = filt.apply_filter(filtered[:, channel])
-    return filtered
-
-
 class QualityAnalyzer:
-    """Compute before/after objective quality measurements and comparisons."""
+    """Objective loudness, dynamics, spectral and before/after analysis."""
 
     def __init__(self) -> None:
         self._meters: dict[int, pyln.Meter] = {}
@@ -158,13 +139,10 @@ class QualityAnalyzer:
         }
 
     def automated_report(self, before: np.ndarray, after: np.ndarray, sample_rate: int, context: dict | None = None) -> dict:
-        before_metrics = self.analyze(before, sample_rate)
-        after_metrics = self.analyze(after, sample_rate)
-        comparison = self.compare(before, after, sample_rate)
         return {
             "report_version": 1,
             "context": context or {},
-            "before": before_metrics,
-            "after": after_metrics,
-            "comparison": comparison,
+            "before": self.analyze(before, sample_rate),
+            "after": self.analyze(after, sample_rate),
+            "comparison": self.compare(before, after, sample_rate),
         }
