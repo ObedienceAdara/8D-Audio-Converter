@@ -11,14 +11,18 @@ from .trajectory import TrajectoryGenerator
 
 
 class SpatialEngine:
-    """Compose trajectory, panning, ILD/ITD, and optional analytic HRTF."""
+    """Compose spatial motion, legacy stereo mode, and binaural HRTF rendering."""
 
-    def __init__(self, block_size: int = 4096, hrtf_ir_length: int = 96) -> None:
+    def __init__(self, block_size: int = 1024, hrtf_ir_length: int = 256, hrtf_path: str | None = None) -> None:
         self.trajectory = TrajectoryGenerator()
         self.panner = EqualPowerPanner()
         self.ild = InterauralLevelDifference()
         self.itd = InterauralTimeDifference()
-        self.hrtf = HRTFConvolver(ir_length=hrtf_ir_length, block_size=block_size, ild=self.ild, itd=self.itd)
+        self.hrtf = HRTFConvolver(ir_length=hrtf_ir_length, block_size=block_size, hrtf_path=hrtf_path)
+
+    @property
+    def hrtf_source(self) -> str:
+        return self.hrtf.source
 
     def process(
         self,
@@ -26,14 +30,12 @@ class SpatialEngine:
         speed_hz: float,
         depth: float,
         use_hrtf: bool = False,
+        headphone_mode: bool = True,
     ) -> AudioBuffer:
-        if audio.channels == 1:
-            mono = audio.samples[:, 0]
-        else:
-            mono = np.mean(audio.samples[:, :2], axis=1)
+        mono = audio.samples[:, 0] if audio.channels == 1 else np.mean(audio.samples[:, :2], axis=1)
         azimuth = self.trajectory.generate(audio.frames, audio.sample_rate, speed_hz, depth)
 
-        if use_hrtf:
+        if use_hrtf or headphone_mode:
             output = self.hrtf.process(mono, azimuth, audio.sample_rate)
         else:
             stereo = self.panner.pan(mono, azimuth)
