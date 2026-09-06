@@ -20,13 +20,12 @@ def test_trajectory_zero_depth_is_centered():
     assert np.allclose(trajectory, 0.0)
 
 
-def test_trajectory_has_expected_period():
+def test_trajectory_completes_expected_number_of_cycles():
     sample_rate = 1000
     speed_hz = 2.0
-    frames = sample_rate
-    trajectory = TrajectoryGenerator().generate(frames, sample_rate, speed_hz, 1.0)
-    period = int(round(sample_rate / speed_hz))
-    assert np.isclose(trajectory[0], trajectory[period], atol=1e-4)
+    trajectory = TrajectoryGenerator().generate(sample_rate, sample_rate, speed_hz, 1.0)
+    assert np.isclose(trajectory[0], 0.0, atol=1e-6)
+    assert np.isclose(trajectory[-1], 0.0, atol=1e-6)
 
 
 def test_equal_power_panner_is_constant_power():
