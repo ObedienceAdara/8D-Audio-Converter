@@ -82,6 +82,22 @@ def test_itd_applies_time_varying_delay_per_frame():
     assert np.array_equal(output[:, 1], np.array([1, 0, 0, 0, 0], dtype=np.float32))
 
 
+def test_spatial_engine_zero_depth_is_centered():
+    source = np.ones((256, 1), dtype=np.float32) * 0.1
+    output = SpatialEngine().process(AudioBuffer(source, 48000), 0.5, 0.0, use_hrtf=False)
+    assert np.allclose(output.samples[:, 0], output.samples[:, 1], atol=1e-7)
+
+
+def test_spatial_engine_hard_right_is_right_dominant():
+    source = np.ones((256, 1), dtype=np.float32) * 0.1
+    engine = SpatialEngine()
+    engine.trajectory.generate = lambda frames, sample_rate, speed_hz, depth: np.full(
+        frames, 90.0, dtype=np.float32
+    )
+    output = engine.process(AudioBuffer(source, 48000), 0.5, 1.0, use_hrtf=False)
+    assert float(np.mean(output.samples[:, 1])) > float(np.mean(output.samples[:, 0]))
+
+
 def test_spatial_engine_produces_stereo_and_finite_samples():
     t = np.arange(2048, dtype=np.float32) / 48000.0
     source = 0.2 * np.sin(2 * np.pi * 440.0 * t)
