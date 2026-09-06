@@ -154,6 +154,8 @@ def test_create_job_returns_accepted_and_uses_binaural_defaults(client):
     assert manager.config.hrtf_enabled is True
     assert manager.config.spatial_mode == "binaural"
     assert manager.config.headphone_mode is True
+    assert manager.config.hrtf_interpolation_quality == "spherical"
+    assert manager.config.hrtf_interpolation_neighbors == 4
     assert manager.config.output_format == "wav"
     assert manager.record.filename == "track.wav"
     assert "progress" in body["job"]
@@ -168,6 +170,10 @@ def test_create_job_accepts_sofa_and_measured_room_configuration(client):
             "file": (bytes(16), "track.wav"),
             "hrtf_source": "sofa",
             "hrtf_sofa_path": "/tmp/listener.sofa",
+            "hrtf_interpolation_quality": "bilinear",
+            "hrtf_interpolation_neighbors": "6",
+            "hrtf_filter_crossfade_blocks": "3",
+            "hrtf_trajectory_smoothing": "0.2",
             "room_model": "measured-wav",
             "room_ir_path": "/tmp/room.wav",
         },
@@ -176,6 +182,10 @@ def test_create_job_accepts_sofa_and_measured_room_configuration(client):
     assert response.status_code == 202
     assert manager.config.hrtf_source == "sofa"
     assert manager.config.hrtf_sofa_path == "/tmp/listener.sofa"
+    assert manager.config.hrtf_interpolation_quality == "bilinear"
+    assert manager.config.hrtf_interpolation_neighbors == 6
+    assert manager.config.hrtf_filter_crossfade_blocks == 3
+    assert manager.config.hrtf_trajectory_smoothing == 0.2
     assert manager.config.room_model == "measured-wav"
     assert manager.config.room_ir_path == "/tmp/room.wav"
 
