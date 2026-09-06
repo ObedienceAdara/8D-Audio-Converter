@@ -18,6 +18,8 @@ class FakeRecord:
         self.output_format = "wav"
         self.metrics = {"peak_dbfs": -1.0}
         self.waveform = [0.1, 0.5, 0.2]
+        self.quality_report_path = None
+        self.quality_report_html_path = None
         self.progress = 100 if status == "completed" else 42 if status == "processing" else 0
         self.stage = "Complete" if status == "completed" else "Processing" if status == "processing" else "queued"
         self.error = None
@@ -132,17 +134,14 @@ def test_create_job_validates_processing_parameters(client):
     test_client, _manager = client
     response = test_client.post(
         "/api/jobs",
-        data={
-            "file": (bytes(16), "track.wav"),
-            "depth": "2.0",
-        },
+        data={"file": (bytes(16), "track.wav"), "depth": "2.0"},
         content_type="multipart/form-data",
     )
     assert response.status_code == 400
     assert "depth" in response.get_json()["error"]
 
 
-def test_create_job_returns_accepted_and_uses_phase_two_defaults(client):
+def test_create_job_returns_accepted_and_uses_binaural_defaults(client):
     test_client, manager = client
     response = test_client.post(
         "/api/jobs",
@@ -152,11 +151,33 @@ def test_create_job_returns_accepted_and_uses_phase_two_defaults(client):
     assert response.status_code == 202
     body = response.get_json()
     assert body["status_url"] == "/api/jobs/job-123"
-    assert manager.config.hrtf_enabled is False
+    assert manager.config.hrtf_enabled is True
+    assert manager.config.spatial_mode == "binaural"
+    assert manager.config.headphone_mode is True
     assert manager.config.output_format == "wav"
     assert manager.record.filename == "track.wav"
     assert "progress" in body["job"]
     assert "stage" in body["job"]
+
+
+def test_create_job_accepts_sofa_and_measured_room_configuration(client):
+    test_client, manager = client
+    response = test_client.post(
+        "/api/jobs",
+        data={
+            "file": (bytes(16), "track.wav"),
+            "hrtf_source": "sofa",
+            "hrtf_sofa_path": "/tmp/listener.sofa",
+            "room_model": "measured-wav",
+            "room_ir_path": "/tmp/room.wav",
+        },
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 202
+    assert manager.config.hrtf_source == "sofa"
+    assert manager.config.hrtf_sofa_path == "/tmp/listener.sofa"
+    assert manager.config.room_model == "measured-wav"
+    assert manager.config.room_ir_path == "/tmp/room.wav"
 
 
 def test_job_status_is_404_for_unknown_job(client):
@@ -218,10 +239,7 @@ def test_batch_endpoint_accepts_multiple_files(client):
     response = test_client.post(
         "/api/batches",
         data={
-            "files": [
-                (bytes(16), "one.wav"),
-                (bytes(16), "two.mp3"),
-            ],
+            "files": [(bytes(16), "one.wav"), (bytes(16), "two.mp3")],
             "preset": "deep",
             "output_format": "wav",
         },
