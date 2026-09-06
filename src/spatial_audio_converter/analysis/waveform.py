@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from itertools import pairwise
+
 import numpy as np
 
 
@@ -19,7 +21,7 @@ def summarize_waveform(samples: np.ndarray, points: int = 512) -> list[float]:
 
     edges = np.linspace(0, data.size, min(points, data.size) + 1, dtype=int)
     envelope: list[float] = []
-    for start, end in zip(edges[:-1], edges[1:]):
+    for start, end in pairwise(edges):
         if end <= start:
             continue
         envelope.append(float(np.max(data[start:end])))
