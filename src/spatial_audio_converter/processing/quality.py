@@ -24,23 +24,30 @@ def _true_peak_dbfs(audio: np.ndarray) -> float:
     return _db(max(peaks) if peaks else 0.0)
 
 
-def _spectral_summary(audio: np.ndarray, sample_rate: int) -> dict[str, float]:
+def _spectral_profile(audio: np.ndarray, sample_rate: int, bins: int = 32) -> dict[str, list[float]]:
     x = np.asarray(audio, dtype=np.float64)
     if x.ndim == 2:
         x = np.mean(x, axis=1)
     if not x.size:
+        return {"frequencies_hz": [], "magnitude_db": []}
+    frequencies = np.geomspace(20.0, min(20000.0, sample_rate / 2.0), bins)
+    spectrum = np.abs(np.fft.rfft(x * np.hanning(len(x)))) + EPS
+    fft_frequencies = np.fft.rfftfreq(len(x), 1.0 / sample_rate)
+    magnitude_db = np.interp(np.log(frequencies), np.log(fft_frequencies[1:]), 20.0 * np.log10(spectrum[1:]))
+    return {"frequencies_hz": [round(float(value), 3) for value in frequencies], "magnitude_db": [round(float(value), 3) for value in magnitude_db]}
+
+
+def _spectral_summary(audio: np.ndarray, sample_rate: int) -> dict[str, float]:
+    profile = _spectral_profile(audio, sample_rate, bins=64)
+    if not profile["frequencies_hz"]:
         return {"spectral_centroid_hz": 0.0, "spectral_rolloff_hz": 0.0}
-    spectrum = np.abs(np.fft.rfft(x * np.hanning(len(x))))
-    frequencies = np.fft.rfftfreq(len(x), 1.0 / sample_rate)
-    total = float(np.sum(spectrum))
-    centroid = float(np.sum(frequencies * spectrum) / max(total, EPS))
-    cumulative = np.cumsum(spectrum)
-    cutoff = 0.85 * cumulative[-1]
-    index = int(np.searchsorted(cumulative, cutoff)) if cumulative[-1] > 0 else 0
-    return {
-        "spectral_centroid_hz": round(centroid, 3),
-        "spectral_rolloff_hz": round(float(frequencies[min(index, len(frequencies) - 1)]), 3),
-    }
+    frequencies = np.asarray(profile["frequencies_hz"])
+    magnitude = 10.0 ** (np.asarray(profile["magnitude_db"]) / 20.0)
+    total = float(np.sum(magnitude))
+    centroid = float(np.sum(frequencies * magnitude) / max(total, EPS))
+    cumulative = np.cumsum(magnitude)
+    index = int(np.searchsorted(cumulative, 0.85 * cumulative[-1])) if cumulative[-1] else 0
+    return {"spectral_centroid_hz": round(centroid, 3), "spectral_rolloff_hz": round(float(frequencies[index]), 3)}
 
 
 def _band_energies(audio: np.ndarray, sample_rate: int) -> dict[str, float]:
@@ -61,7 +68,7 @@ def _band_energies(audio: np.ndarray, sample_rate: int) -> dict[str, float]:
 
 
 class QualityAnalyzer:
-    """Objective loudness, dynamics, spectral and before/after analysis."""
+    """Objective loudness, dynamics, frequency-response and before/after analysis."""
 
     def __init__(self) -> None:
         self._meters: dict[int, pyln.Meter] = {}
@@ -100,6 +107,7 @@ class QualityAnalyzer:
             "crest_factor_db": round(float(crest), 3),
             "integrated_lufs": None if np.isnan(lufs) else round(lufs, 3),
             "spectral": _spectral_summary(x, sample_rate),
+            "frequency_response": _spectral_profile(x, sample_rate),
             "bands": _band_energies(x, sample_rate),
         }
 
@@ -117,8 +125,11 @@ class QualityAnalyzer:
         signal_power = float(np.mean(reference**2))
         noise_power = float(np.mean(residual**2))
         snr = 10.0 * np.log10(max(signal_power, EPS) / max(noise_power, EPS))
-        spectral_before = _spectral_summary(reference, sample_rate)
-        spectral_after = _spectral_summary(rendered, sample_rate)
+        spectral_before = _spectral_profile(reference, sample_rate)
+        spectral_after = _spectral_profile(rendered, sample_rate)
+        before_mag = np.asarray(spectral_before["magnitude_db"])
+        after_mag = np.asarray(spectral_after["magnitude_db"])
+        spectral_distance = float(np.sqrt(np.mean(np.square(after_mag - before_mag)))) if len(before_mag) else 0.0
         band_before = _band_energies(reference, sample_rate)
         band_after = _band_energies(rendered, sample_rate)
         spectral_delta = {
@@ -129,11 +140,16 @@ class QualityAnalyzer:
         return {
             "duration_delta_seconds": round(len(b) / sample_rate - len(a) / sample_rate, 4),
             "downmix_snr_db": round(float(snr), 3),
+            "spectral_distance_rmse_db": round(spectral_distance, 3),
             "spectral_centroid_delta_hz": round(
-                spectral_after["spectral_centroid_hz"] - spectral_before["spectral_centroid_hz"], 3
+                _spectral_summary(rendered, sample_rate)["spectral_centroid_hz"]
+                - _spectral_summary(reference, sample_rate)["spectral_centroid_hz"],
+                3,
             ),
             "spectral_rolloff_delta_hz": round(
-                spectral_after["spectral_rolloff_hz"] - spectral_before["spectral_rolloff_hz"], 3
+                _spectral_summary(rendered, sample_rate)["spectral_rolloff_hz"]
+                - _spectral_summary(reference, sample_rate)["spectral_rolloff_hz"],
+                3,
             ),
             "band_level_delta_db": spectral_delta,
         }
@@ -141,6 +157,7 @@ class QualityAnalyzer:
     def automated_report(self, before: np.ndarray, after: np.ndarray, sample_rate: int, context: dict | None = None) -> dict:
         return {
             "report_version": 1,
+            "standard_reference": "ITU-R BS.1770-style integrated loudness via pyloudnorm",
             "context": context or {},
             "before": self.analyze(before, sample_rate),
             "after": self.analyze(after, sample_rate),
