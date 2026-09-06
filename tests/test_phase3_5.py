@@ -30,10 +30,13 @@ def test_sofa_loader_accepts_two_receiver_hrir(tmp_path: Path):
     path = tmp_path / "listener.sofa"
     with h5py.File(path, "w") as sofa:
         sofa.attrs["SOFAConventions"] = "SimpleFreeFieldHRIR"
-        sofa.create_dataset("Data.IR", data=np.stack([
-            np.stack([np.array([1.0, 0.5, 0.0]), np.array([0.9, 0.2, 0.0])]),
-            np.stack([np.array([0.8, 0.2, 0.0]), np.array([1.0, 0.4, 0.0])]),
-        ]).astype(np.float32))
+        sofa.create_dataset(
+            "Data.IR",
+            data=np.stack([
+                np.stack([np.array([1.0, 0.5, 0.0]), np.array([0.9, 0.2, 0.0])]),
+                np.stack([np.array([0.8, 0.2, 0.0]), np.array([1.0, 0.4, 0.0])]),
+            ]).astype(np.float32),
+        )
         sofa.create_dataset("Data.SamplingRate", data=np.array([48000.0]))
         sofa.create_dataset("SourcePosition", data=np.array([[-90.0, 0.0, 1.0], [90.0, 0.0, 1.0]]))
     database = HRTFDatabase.from_sofa(path)
@@ -45,8 +48,7 @@ def test_sofa_loader_accepts_two_receiver_hrir(tmp_path: Path):
 
 def test_room_model_adds_early_reflection_and_late_tail():
     source = np.zeros((4096, 2), dtype=np.float32)
-    source[0, 0] = 1.0
-    source[0, 1] = 1.0
+    source[0] = 1.0
     room = RoomReverb()
     output = room.process(source, 48000, 40, 0.6, 1.0, room_size=0.8, damping=0.3)
     assert output.shape == source.shape
@@ -66,8 +68,7 @@ def test_measured_room_ir_can_replace_algorithmic_model(tmp_path: Path):
         wav.writeframes(pcm.tobytes())
     source = np.zeros((16, 2), dtype=np.float32)
     source[0] = 1.0
-    output = RoomReverb(path).process(source, 48000, 50, 0.5, 1.0)
-    assert room := True
+    output = RoomReverb(path).process(source, 48000, 50, 0.5, 1.0, room_model="measured-wav")
     assert np.count_nonzero(output) >= 2
 
 
