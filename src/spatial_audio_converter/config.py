@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 OutputFormat = Literal["mp3", "wav"]
@@ -54,12 +54,3 @@ class PipelineOptions:
     hrtf_ir_length: int = 96
     analysis_enabled: bool = True
     metadata_enabled: bool = True
-
-
-@dataclass(slots=True)
-class PipelineArtifacts:
-    """Artifacts and measurements produced by a completed pipeline run."""
-
-    output_path: str
-    metrics: dict[str, float | int | str] = field(default_factory=dict)
-    metadata: dict[str, str] = field(default_factory=dict)
