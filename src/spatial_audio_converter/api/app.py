@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from flask import Flask, jsonify, render_template, request, send_file
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
@@ -48,7 +46,7 @@ def create_app(job_manager: JobManager | None = None) -> Flask:
                 output_format=request.form.get("output_format", "mp3"),
                 output_bitrate=request.form.get("output_bitrate", "320k"),
                 room_enabled=request.form.get("room_enabled", "true").lower() == "true",
-                hrtf_enabled=request.form.get("hrtf_enabled", "true").lower() == "true",
+                hrtf_enabled=request.form.get("hrtf_enabled", "false").lower() == "true",
             )
         except (TypeError, ValueError) as exc:
             return jsonify({"error": str(exc)}), 400
@@ -73,6 +71,8 @@ def create_app(job_manager: JobManager | None = None) -> Flask:
             return jsonify({"error": "Job not found."}), 404
         if record.status != "completed" or not record.output_path:
             return jsonify({"error": "Output is not ready."}), 409
+        from pathlib import Path
+
         output = Path(record.output_path)
         if not output.exists():
             return jsonify({"error": "Output artifact has expired."}), 410
