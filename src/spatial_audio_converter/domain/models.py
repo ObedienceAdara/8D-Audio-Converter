@@ -92,6 +92,8 @@ class PipelineArtifacts:
     """Artifacts and measurements produced by a completed pipeline run."""
 
     output_path: str
-    metrics: dict[str, float | int | str] = field(default_factory=dict)
+    metrics: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, str] = field(default_factory=dict)
     waveform: list[float] = field(default_factory=list)
+    quality_report_path: str | None = None
+    quality_report_html_path: str | None = None
