@@ -6,6 +6,7 @@ from typing import Literal
 OutputFormat = Literal["mp3", "wav"]
 SpatialMode = Literal["binaural", "stereo"]
 RoomModel = Literal["schroeder-moorer", "measured-wav", "early-reflections"]
+HRTFInterpolationQuality = Literal["nearest", "bilinear", "spherical"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +33,10 @@ class AudioProcessingConfig:
     headphone_mode: bool = True
     hrtf_source: Literal["synthetic", "sofa"] = "synthetic"
     hrtf_sofa_path: str | None = None
+    hrtf_interpolation_quality: HRTFInterpolationQuality = "spherical"
+    hrtf_interpolation_neighbors: int = 4
+    hrtf_filter_crossfade_blocks: int = 2
+    hrtf_trajectory_smoothing: float = 0.15
 
     def __post_init__(self) -> None:
         if not 0 < self.pan_speed_hz <= 2.0:
@@ -66,6 +71,14 @@ class AudioProcessingConfig:
             raise ValueError("hrtf_source must be 'synthetic' or 'sofa'.")
         if self.hrtf_source == "sofa" and not self.hrtf_sofa_path:
             raise ValueError("hrtf_sofa_path is required when hrtf_source='sofa'.")
+        if self.hrtf_interpolation_quality not in {"nearest", "bilinear", "spherical"}:
+            raise ValueError("unsupported hrtf_interpolation_quality")
+        if not 2 <= self.hrtf_interpolation_neighbors <= 32:
+            raise ValueError("hrtf_interpolation_neighbors must be in [2, 32].")
+        if not 0 <= self.hrtf_filter_crossfade_blocks <= 16:
+            raise ValueError("hrtf_filter_crossfade_blocks must be in [0, 16].")
+        if not 0 <= self.hrtf_trajectory_smoothing <= 1:
+            raise ValueError("hrtf_trajectory_smoothing must be in [0, 1].")
 
 
 @dataclass(slots=True)
