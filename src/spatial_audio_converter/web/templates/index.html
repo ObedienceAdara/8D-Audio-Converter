@@ -3,58 +3,162 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A queue-backed spatial audio converter with explicit azimuth, equal-power panning, ILD and ITD processing.">
   <title>Spatial Audio Converter</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
   <main class="shell">
-    <header>
-      <p class="eyebrow">SPATIAL AUDIO ENGINE</p>
-      <h1>8D / Spatial Audio Converter</h1>
-      <p>Upload an audio file, configure the spatial pipeline, and download the processed result.</p>
+    <header class="hero">
+      <div>
+        <p class="eyebrow">SPATIAL AUDIO ENGINE · PHASE 6–8</p>
+        <h1>Turn ordinary audio into measurable spatial motion.</h1>
+        <p class="lede">Queue the render, watch the trajectory, preview the result, and keep the signal path explicit.</p>
+      </div>
+      <div class="hero-badge">Queue → Worker → Storage</div>
     </header>
 
     <section class="card">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">INPUT</p>
+          <h2>Build a conversion</h2>
+        </div>
+        <span id="format-hint" class="muted">MP3, WAV, FLAC, OGG, M4A, AAC · 32 MB max</span>
+      </div>
+
       <form id="convert-form">
-        <label>Audio file
-          <input id="file" name="file" type="file" accept="audio/*" required>
+        <label class="file-drop" for="file">
+          <span class="file-title">Choose audio files</span>
+          <span class="file-copy">Single-file or batch conversion. Your browser previews the source locally.</span>
+          <input id="file" name="file" type="file" accept="audio/*,.m4a,.aac" multiple required>
+          <span id="file-name" class="file-name">No files selected</span>
         </label>
-        <div class="grid">
+
+        <div class="grid controls-grid">
+          <label>Preset
+            <select id="preset" name="preset"></select>
+          </label>
+          <label>Output format
+            <select name="output_format">
+              <option value="mp3">MP3</option>
+              <option value="wav">WAV</option>
+            </select>
+          </label>
+          <label>MP3 bitrate
+            <select name="output_bitrate">
+              <option value="192k">192 kbps</option>
+              <option value="256k">256 kbps</option>
+              <option value="320k" selected>320 kbps</option>
+            </select>
+          </label>
           <label>Pan speed (Hz)
             <input name="pan_speed_hz" type="number" min="0.01" max="2" step="0.01" value="0.5">
           </label>
           <label>Depth
-            <input name="depth" type="number" min="0" max="1" step="0.01" value="0.95">
+            <input name="depth" type="number" min="0" max="1" step="0.01" value="0.75">
           </label>
           <label>Room delay (ms)
             <input name="reverb_delay_ms" type="number" min="1" max="500" step="1" value="50">
           </label>
           <label>Room decay
-            <input name="reverb_decay" type="number" min="0" max="1" step="0.01" value="0.3">
+            <input name="reverb_decay" type="number" min="0" max="1" step="0.01" value="0.25">
           </label>
           <label>Room mix
-            <input name="reverb_mix" type="number" min="0" max="1" step="0.01" value="0.3">
+            <input name="reverb_mix" type="number" min="0" max="1" step="0.01" value="0.25">
           </label>
           <label>Target RMS (dBFS)
             <input name="target_rms_db" type="number" min="-60" max="0" step="0.5" value="-18">
           </label>
-          <label>Output format
-            <select name="output_format"><option value="mp3">MP3</option><option value="wav">WAV</option></select>
+          <label>Limiter ceiling (dBFS)
+            <input name="limiter_db" type="number" min="-20" max="0" step="0.5" value="-1">
           </label>
-          <label>Analytic HRTF stage
-            <select name="hrtf_enabled"><option value="false" selected>Disabled (Phase 2 baseline)</option><option value="true">Enabled</option></select>
+          <label>Room model
+            <select name="room_enabled">
+              <option value="true" selected>Enabled</option>
+              <option value="false">Disabled</option>
+            </select>
+          </label>
+          <label>Analytic HRTF
+            <select name="hrtf_enabled">
+              <option value="false" selected>Disabled · Phase 2 baseline</option>
+              <option value="true">Enabled · analytic approximation</option>
+            </select>
           </label>
         </div>
-        <button type="submit">Convert audio</button>
+
+        <div class="actions">
+          <button type="submit">Queue conversion</button>
+          <button type="button" id="reset" class="secondary">Reset</button>
+        </div>
       </form>
-      <div id="status" class="status" hidden></div>
+    </section>
+
+    <section class="visual-grid">
+      <article class="card">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">WAVEFORM</p>
+            <h2>Source preview</h2>
+          </div>
+          <span id="source-duration" class="muted">—</span>
+        </div>
+        <audio id="source-audio" controls preload="metadata" hidden></audio>
+        <canvas id="source-waveform" class="waveform" width="1000" height="180" aria-label="Source waveform"></canvas>
+      </article>
+
+      <article class="card">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">SPATIAL TRAJECTORY</p>
+            <h2>Where the source is moving</h2>
+          </div>
+          <span id="azimuth-label" class="mono">0°</span>
+        </div>
+        <canvas id="trajectory" class="trajectory" width="500" height="320" aria-label="Animated spatial azimuth trajectory"></canvas>
+        <div class="trajectory-legend"><span>LEFT</span><span>CENTER</span><span>RIGHT</span></div>
+      </article>
+    </section>
+
+    <section id="progress-card" class="card" hidden>
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">PROCESSING</p>
+          <h2 id="progress-title">Queueing</h2>
+        </div>
+        <strong id="progress-percent">0%</strong>
+      </div>
+      <div class="progress-track" aria-hidden="true"><div id="progress-bar" class="progress-bar"></div></div>
+      <div class="progress-meta">
+        <span id="progress-stage">Queued</span>
+        <span id="queue-depth">Queue depth: 0</span>
+      </div>
+      <div id="batch-list" class="batch-list" hidden></div>
     </section>
 
     <section id="result" class="card" hidden>
-      <h2>Processing result</h2>
-      <pre id="metrics"></pre>
-      <a id="download" class="button" href="#">Download output</a>
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">RESULT</p>
+          <h2>Rendered output</h2>
+        </div>
+        <span id="result-format" class="muted">—</span>
+      </div>
+      <audio id="output-audio" controls preload="metadata"></audio>
+      <canvas id="output-waveform" class="waveform" width="1000" height="180" aria-label="Rendered output waveform"></canvas>
+      <div class="result-grid">
+        <pre id="metrics"></pre>
+        <div class="result-actions">
+          <a id="download" class="button" href="#">Download output</a>
+          <p class="muted">The output artifact remains available for a limited retention window.</p>
+        </div>
+      </div>
     </section>
+
+    <footer>
+      <span>Explicit DSP: equal-power panning + azimuth + ILD + ITD.</span>
+      <a href="/health">System health</a>
+    </footer>
   </main>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

@@ -94,3 +94,4 @@ class PipelineArtifacts:
     output_path: str
     metrics: dict[str, float | int | str] = field(default_factory=dict)
     metadata: dict[str, str] = field(default_factory=dict)
+    waveform: list[float] = field(default_factory=list)
