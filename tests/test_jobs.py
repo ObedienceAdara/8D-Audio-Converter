@@ -1,5 +1,9 @@
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from threading import Event
+import time
+
+import pytest
 
 from spatial_audio_converter.config import AudioProcessingConfig
 from spatial_audio_converter.domain.models import PipelineArtifacts
@@ -19,16 +23,56 @@ class FakePipeline:
         return PipelineArtifacts(str(output_path), metrics={"ok": 1}, metadata={}, waveform=[0.1, 0.2])
 
 
+class BlockingPipeline:
+    def __init__(self):
+        self.started = Event()
+        self.release = Event()
+
+    def run(self, input_path, output_path, config, progress_callback=None):
+        self.started.set()
+        self.release.wait(timeout=5)
+        Path(output_path).write_bytes(b"processed")
+        return PipelineArtifacts(str(output_path))
+
+
 def test_bounded_queue_rejects_overflow():
     queue = InProcessJobQueue(maxsize=1)
-    task = object()
-    queue.put(task)
-    try:
+    queue.put(object())
+    with pytest.raises(QueueFullError):
         queue.put(object())
-    except QueueFullError:
-        pass
-    else:
-        raise AssertionError("expected QueueFullError")
+
+
+def test_job_manager_requires_positive_worker_count(tmp_path):
+    with pytest.raises(ValueError, match="max_workers"):
+        JobManager(storage=LocalStorage(tmp_path / "storage"), max_workers=0)
+
+
+def test_job_manager_submit_returns_before_conversion_finishes(tmp_path):
+    pipeline = BlockingPipeline()
+    manager = JobManager(
+        pipeline=pipeline,
+        storage=LocalStorage(tmp_path / "storage"),
+        max_workers=1,
+        queue_size=2,
+    )
+    try:
+        config = AudioProcessingConfig(output_format="wav", room_enabled=False, hrtf_enabled=False)
+        with NamedTemporaryFile(suffix=".wav") as source:
+            source.write(b"input")
+            source.flush()
+            started = time.monotonic()
+            record = manager.submit(source, "input.wav", config)
+            submission_time = time.monotonic() - started
+            assert submission_time < 1.0
+            assert pipeline.started.wait(timeout=2)
+            assert record.status in {"queued", "processing"}
+            assert not record.done_event.is_set()
+            pipeline.release.set()
+            manager.wait(record.id, timeout=5)
+            assert record.status == "completed"
+    finally:
+        pipeline.release.set()
+        manager.shutdown()
 
 
 def test_job_manager_uses_queue_workers_and_exposes_progress(tmp_path):
