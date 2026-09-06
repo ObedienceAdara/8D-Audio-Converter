@@ -3,6 +3,7 @@ from __future__ import annotations
 import wave
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from typing import ClassVar
 
 import numpy as np
 from pydub import AudioSegment
@@ -13,7 +14,7 @@ from ..domain.models import AudioBuffer
 class AudioEncoder:
     """Encode normalized floating-point audio into WAV or MP3 artifacts."""
 
-    SUPPORTED_OUTPUTS = {"wav", "mp3"}
+    SUPPORTED_OUTPUTS: ClassVar[set[str]] = {"wav", "mp3"}
 
     def encode(
         self,
