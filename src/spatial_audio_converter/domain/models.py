@@ -96,3 +96,4 @@ class PipelineArtifacts:
     metadata: dict[str, str] = field(default_factory=dict)
     waveform: list[float] = field(default_factory=list)
     quality_report_path: str | None = None
+    quality_report_html_path: str | None = None
