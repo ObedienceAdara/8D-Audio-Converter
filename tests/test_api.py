@@ -6,33 +6,37 @@ import pytest
 from spatial_audio_converter.api.app import create_app
 
 
+class FakeRecord:
+    def __init__(self, status="queued", output_path=None):
+        self.id = "job-123"
+        self.status = status
+        self.created_at = "2026-09-06T00:00:00+00:00"
+        self.filename = "track.wav"
+        self.output_path = str(output_path) if output_path else None
+        self.metrics = {"peak_dbfs": -1.0}
+        self.error = None
+
+    def as_dict(self):
+        return {
+            "id": self.id,
+            "status": self.status,
+            "created_at": self.created_at,
+            "filename": self.filename,
+            "output_path": self.output_path,
+            "metrics": self.metrics,
+            "error": self.error,
+        }
+
+
 class FakeJobManager:
     def __init__(self, status="queued", output_path=None):
-        self.record = SimpleNamespace(
-            id="job-123",
-            status=status,
-            created_at="2026-09-06T00:00:00+00:00",
-            filename="track.wav",
-            output_path=str(output_path) if output_path else None,
-            metrics={"peak_dbfs": -1.0},
-            error=None,
-        )
+        self.record = FakeRecord(status=status, output_path=output_path)
+        self.config = None
 
     def submit(self, _stream, filename, config):
         self.record.filename = filename
         self.config = config
-        return self
-
-    def as_dict(self):
-        return {
-            "id": self.record.id,
-            "status": self.record.status,
-            "created_at": self.record.created_at,
-            "filename": self.record.filename,
-            "output_path": self.record.output_path,
-            "metrics": self.record.metrics,
-            "error": self.record.error,
-        }
+        return self.record
 
     def get(self, job_id):
         return self.record if job_id == self.record.id else None
