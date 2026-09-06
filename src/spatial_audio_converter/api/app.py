@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from dataclasses import replace
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_file
@@ -7,16 +9,73 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
 from ..config import AudioProcessingConfig
-from ..jobs.manager import JobManager
+from ..jobs.manager import JobManager, JobRecord
+from ..jobs.queue import QueueFullError
+from ..presets import get_preset, list_presets
 
 MAX_UPLOAD_BYTES = 32 * 1024 * 1024
 ALLOWED_INPUTS = {"mp3", "wav", "flac", "ogg", "m4a", "aac"}
 
 
+def _parse_bool(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"true", "1", "yes", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "off"}:
+        return False
+    raise ValueError("boolean values must be true or false")
+
+
+def _config_from_form(form) -> AudioProcessingConfig:
+    config = get_preset(form.get("preset", "balanced"))
+    overrides = {}
+    casts = {
+        "pan_speed_hz": float,
+        "depth": float,
+        "reverb_delay_ms": int,
+        "reverb_decay": float,
+        "reverb_mix": float,
+        "target_rms_db": float,
+        "limiter_db": float,
+        "output_format": str,
+        "output_bitrate": str,
+        "max_duration_seconds": int,
+        "room_enabled": _parse_bool,
+        "hrtf_enabled": _parse_bool,
+    }
+    for key, caster in casts.items():
+        raw = form.get(key)
+        if raw not in (None, ""):
+            overrides[key] = caster(raw)
+    return replace(config, **overrides)
+
+
+def _filename_or_error(filename: str | None) -> tuple[str | None, str | None]:
+    safe_name = secure_filename(filename or "")
+    suffix = safe_name.rsplit(".", 1)[-1].lower() if "." in safe_name else ""
+    if not safe_name or suffix not in ALLOWED_INPUTS:
+        return None, f"Unsupported input format. Allowed: {sorted(ALLOWED_INPUTS)}"
+    return safe_name, None
+
+
+def _job_payload(record: JobRecord, queue_depth: int) -> dict:
+    body = record.as_dict()
+    body["queue_depth"] = queue_depth
+    if record.status == "completed":
+        body["download_url"] = f"/api/jobs/{record.id}/download"
+        body["preview_url"] = f"/api/jobs/{record.id}/preview"
+        body["waveform_url"] = f"/api/jobs/{record.id}/waveform"
+    return body
+
+
 def create_app(job_manager: JobManager | None = None) -> Flask:
     app = Flask(__name__, template_folder="../web/templates", static_folder="../web/static")
     app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
-    manager = job_manager or JobManager(max_workers=2)
+    manager = job_manager or JobManager(
+        max_workers=int(os.getenv("AUDIO_WORKERS", "2")),
+        queue_size=int(os.getenv("AUDIO_QUEUE_SIZE", "64")),
+    )
+    app.extensions["job_manager"] = manager
 
     @app.get("/")
     def home():
@@ -24,46 +83,70 @@ def create_app(job_manager: JobManager | None = None) -> Flask:
 
     @app.get("/health")
     def health():
-        return jsonify({"status": "ok"})
+        return jsonify({"status": "ok", "queue_depth": manager.queue_depth, "workers": manager.active_workers})
+
+    @app.get("/api/presets")
+    def presets():
+        return jsonify({"presets": list_presets()})
 
     @app.post("/api/jobs")
     def create_job():
         if "file" not in request.files:
             return jsonify({"error": "No audio file uploaded."}), 400
         uploaded = request.files["file"]
-        filename = secure_filename(uploaded.filename or "")
-        suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-        if not filename or suffix not in ALLOWED_INPUTS:
-            return jsonify({"error": f"Unsupported input format. Allowed: {sorted(ALLOWED_INPUTS)}"}), 400
+        filename, filename_error = _filename_or_error(uploaded.filename)
+        if filename_error:
+            return jsonify({"error": filename_error}), 400
         try:
-            config = AudioProcessingConfig(
-                pan_speed_hz=float(request.form.get("pan_speed_hz", 0.5)),
-                depth=float(request.form.get("depth", 0.95)),
-                reverb_delay_ms=int(request.form.get("reverb_delay_ms", 50)),
-                reverb_decay=float(request.form.get("reverb_decay", 0.3)),
-                reverb_mix=float(request.form.get("reverb_mix", 0.3)),
-                target_rms_db=float(request.form.get("target_rms_db", -18.0)),
-                limiter_db=float(request.form.get("limiter_db", -1.0)),
-                output_format=request.form.get("output_format", "mp3"),
-                output_bitrate=request.form.get("output_bitrate", "320k"),
-                room_enabled=request.form.get("room_enabled", "true").lower() == "true",
-                hrtf_enabled=request.form.get("hrtf_enabled", "false").lower() == "true",
-            )
+            config = _config_from_form(request.form)
+            record = manager.submit(uploaded.stream, filename, config)
+        except QueueFullError as exc:
+            return jsonify({"error": str(exc), "retry_after_seconds": 2}), 503
         except (TypeError, ValueError) as exc:
             return jsonify({"error": str(exc)}), 400
+        return jsonify({
+            "job": _job_payload(record, manager.queue_depth),
+            "status_url": f"/api/jobs/{record.id}",
+        }), 202
 
-        record = manager.submit(uploaded.stream, filename, config)
-        return jsonify({"job": record.as_dict(), "status_url": f"/api/jobs/{record.id}"}), 202
+    @app.post("/api/batches")
+    def create_batch():
+        uploaded_files = request.files.getlist("files")
+        if not uploaded_files:
+            uploaded_files = request.files.getlist("file")
+        if not uploaded_files:
+            return jsonify({"error": "No audio files uploaded."}), 400
+
+        items = []
+        for uploaded in uploaded_files:
+            filename, filename_error = _filename_or_error(uploaded.filename)
+            if filename_error:
+                return jsonify({"error": filename_error}), 400
+            items.append((uploaded.stream, filename))
+
+        try:
+            config = _config_from_form(request.form)
+            batch = manager.create_batch(items, config)
+        except QueueFullError as exc:
+            return jsonify({"error": str(exc), "retry_after_seconds": 2}), 503
+        except (TypeError, ValueError) as exc:
+            return jsonify({"error": str(exc)}), 400
+        payload = manager.get_batch(batch.id)
+        return jsonify({"batch": payload, "status_url": f"/api/batches/{batch.id}"}), 202
 
     @app.get("/api/jobs/<job_id>")
     def get_job(job_id: str):
         record = manager.get(job_id)
         if record is None:
             return jsonify({"error": "Job not found."}), 404
-        body = record.as_dict()
-        if record.status == "completed":
-            body["download_url"] = f"/api/jobs/{record.id}/download"
-        return jsonify(body)
+        return jsonify(_job_payload(record, manager.queue_depth))
+
+    @app.get("/api/batches/<batch_id>")
+    def get_batch(batch_id: str):
+        payload = manager.get_batch(batch_id)
+        if payload is None:
+            return jsonify({"error": "Batch not found."}), 404
+        return jsonify(payload)
 
     @app.get("/api/jobs/<job_id>/download")
     def download_job(job_id: str):
@@ -80,6 +163,27 @@ def create_app(job_manager: JobManager | None = None) -> Flask:
             as_attachment=True,
             download_name=f"{Path(record.filename).stem}_spatial.{output.suffix.lstrip('.')}",
         )
+
+    @app.get("/api/jobs/<job_id>/preview")
+    def preview_job(job_id: str):
+        record = manager.get(job_id)
+        if record is None:
+            return jsonify({"error": "Job not found."}), 404
+        if record.status != "completed" or not record.output_path:
+            return jsonify({"error": "Output is not ready."}), 409
+        output = Path(record.output_path)
+        if not output.exists():
+            return jsonify({"error": "Output artifact has expired."}), 410
+        return send_file(output, as_attachment=False, conditional=True)
+
+    @app.get("/api/jobs/<job_id>/waveform")
+    def waveform_job(job_id: str):
+        record = manager.get(job_id)
+        if record is None:
+            return jsonify({"error": "Job not found."}), 404
+        if record.status != "completed":
+            return jsonify({"error": "Waveform is not ready."}), 409
+        return jsonify({"waveform": record.waveform})
 
     @app.errorhandler(RequestEntityTooLarge)
     def too_large(_exc):
