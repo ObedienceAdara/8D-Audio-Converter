@@ -33,17 +33,27 @@ def _config(output_format: str) -> AudioProcessingConfig:
     )
 
 
-def test_end_to_end_wav_conversion(tmp_path: Path):
+def test_end_to_end_wav_conversion_reports_progress(tmp_path: Path):
     input_path = tmp_path / "input.wav"
     output_path = tmp_path / "output.wav"
     _write_test_wav(input_path)
+    progress = []
 
-    artifacts = AudioPipeline().run(input_path, output_path, _config("wav"))
+    artifacts = AudioPipeline().run(
+        input_path,
+        output_path,
+        _config("wav"),
+        progress_callback=lambda value, stage: progress.append((value, stage)),
+    )
 
     assert output_path.exists()
     assert Path(artifacts.output_path) == output_path
     assert artifacts.metrics["output_frames"] == artifacts.metrics["input_frames"]
     assert artifacts.metrics["clipped_samples"] == 0
+    assert artifacts.waveform
+    assert progress[0][0] == 2
+    assert progress[-1] == (100, "Complete")
+    assert [item[0] for item in progress] == sorted(item[0] for item in progress)
 
     decoded = AudioDecoder().decode(output_path, max_duration_seconds=10)
     assert decoded.channels == 2
