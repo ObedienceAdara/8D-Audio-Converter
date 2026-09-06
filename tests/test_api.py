@@ -1,5 +1,4 @@
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -121,3 +120,19 @@ def test_completed_job_exposes_download_url(tmp_path: Path):
     response = app.test_client().get("/api/jobs/job-123")
     assert response.status_code == 200
     assert response.get_json()["download_url"] == "/api/jobs/job-123/download"
+
+
+def test_completed_download_is_served(tmp_path: Path):
+    output = tmp_path / "job-123.wav"
+    payload = b"RIFFfake"
+    output.write_bytes(payload)
+    app = create_app(FakeJobManager(status="completed", output_path=output))
+    response = app.test_client().get("/api/jobs/job-123/download")
+    assert response.status_code == 200
+    assert response.data == payload
+
+
+def test_download_rejects_incomplete_job():
+    app = create_app(FakeJobManager(status="processing"))
+    response = app.test_client().get("/api/jobs/job-123/download")
+    assert response.status_code == 409
