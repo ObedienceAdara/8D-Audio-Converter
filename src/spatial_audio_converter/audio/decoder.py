@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 from pydub import AudioSegment
@@ -11,7 +12,7 @@ from ..domain.models import AudioBuffer, AudioMetadata
 class AudioDecoder:
     """Decode supported media into the pipeline's normalized representation."""
 
-    SUPPORTED_SUFFIXES = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac"}
+    SUPPORTED_SUFFIXES: ClassVar[set[str]] = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac"}
 
     def decode(self, input_path: str | Path, max_duration_seconds: int = 900) -> AudioBuffer:
         path = Path(input_path)
