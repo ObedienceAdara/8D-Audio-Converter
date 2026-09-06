@@ -8,6 +8,8 @@ PRESET_OVERRIDES: dict[str, dict] = {
     "balanced": {
         "pan_speed_hz": 0.50,
         "depth": 0.75,
+        "room_size": 0.65,
+        "room_damping": 0.40,
         "reverb_delay_ms": 50,
         "reverb_decay": 0.25,
         "reverb_mix": 0.25,
@@ -17,6 +19,8 @@ PRESET_OVERRIDES: dict[str, dict] = {
     "deep": {
         "pan_speed_hz": 0.35,
         "depth": 0.95,
+        "room_size": 0.85,
+        "room_damping": 0.30,
         "reverb_delay_ms": 65,
         "reverb_decay": 0.35,
         "reverb_mix": 0.35,
@@ -26,6 +30,8 @@ PRESET_OVERRIDES: dict[str, dict] = {
     "clean": {
         "pan_speed_hz": 0.70,
         "depth": 0.65,
+        "room_size": 0.35,
+        "room_damping": 0.55,
         "reverb_delay_ms": 35,
         "reverb_decay": 0.15,
         "reverb_mix": 0.10,
@@ -44,7 +50,4 @@ def get_preset(name: str | None) -> AudioProcessingConfig:
 
 
 def list_presets() -> list[dict]:
-    return [
-        {"name": name, "config": asdict(get_preset(name))}
-        for name in PRESET_OVERRIDES
-    ]
+    return [{"name": name, "config": asdict(get_preset(name))} for name in PRESET_OVERRIDES]
