@@ -4,7 +4,6 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import BinaryIO
 
 from ..config import AudioProcessingConfig
@@ -129,8 +128,9 @@ class JobManager:
     ) -> BatchRecord:
         if not items:
             raise ValueError("batch must contain at least one file")
-        if len(items) > self.queue.maxsize:
-            raise QueueFullError("Batch exceeds the configured queue capacity.")
+        available = self.queue.maxsize - self.queue.qsize()
+        if len(items) > available:
+            raise QueueFullError("Batch exceeds currently available queue capacity.")
         batch = BatchRecord(
             id=uuid.uuid4().hex,
             created_at=datetime.now(UTC).isoformat(),
@@ -138,9 +138,14 @@ class JobManager:
         )
         with self.lock:
             self.batches[batch.id] = batch
-        for stream, filename in items:
-            record = self.submit(stream, filename, config, batch_id=batch.id)
-            batch.job_ids.append(record.id)
+        try:
+            for stream, filename in items:
+                record = self.submit(stream, filename, config, batch_id=batch.id)
+                batch.job_ids.append(record.id)
+        except Exception:
+            with self.lock:
+                self.batches.pop(batch.id, None)
+            raise
         return batch
 
     def _set_progress(self, record: JobRecord, progress: int, stage: str) -> None:
