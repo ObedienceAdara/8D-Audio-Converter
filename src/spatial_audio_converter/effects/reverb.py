@@ -135,7 +135,7 @@ class RoomReverb:
         )
         self.last_diagnostics = {
             "model": model,
-            "ir_length_samples": int(len(ir)),
+            "ir_length_samples": len(ir),
             "ir_duration_seconds": float(len(ir) / sample_rate),
         }
         return ((1.0 - mix) * dry + mix * wet).astype(np.float32)
