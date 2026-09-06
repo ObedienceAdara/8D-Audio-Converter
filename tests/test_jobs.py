@@ -1,7 +1,7 @@
+import time
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from threading import Event
-import time
 
 import pytest
 
