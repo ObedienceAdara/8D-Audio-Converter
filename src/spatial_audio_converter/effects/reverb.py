@@ -9,11 +9,7 @@ from scipy.signal import fftconvolve, lfilter, resample_poly
 
 
 class RoomReverb:
-    """Early reflections plus Schroeder/Moorer-style late reverberation.
-
-    A measured mono/stereo WAV impulse response can be supplied to replace the
-    algorithmic room model. The public mix remains dry/wet and bounded.
-    """
+    """Early reflections plus Schroeder/Moorer-style late reverberation."""
 
     def __init__(self, room_ir_path: str | None = None) -> None:
         self.room_ir_path = room_ir_path
@@ -24,8 +20,7 @@ class RoomReverb:
         source_rate, data = wavfile.read(path)
         x = np.asarray(data, dtype=np.float32)
         if np.issubdtype(data.dtype, np.integer):
-            scale = float(np.iinfo(data.dtype).max)
-            x /= max(scale, 1.0)
+            x /= max(float(np.iinfo(data.dtype).max), 1.0)
         if x.ndim == 1:
             x = x[:, None]
         if source_rate != sample_rate:
@@ -36,54 +31,62 @@ class RoomReverb:
         if x.shape[1] == 1:
             x = np.repeat(x, 2, axis=1)
         peak = float(np.max(np.abs(x))) if x.size else 1.0
-        if peak > 0:
-            x /= peak
-        return x.astype(np.float32)
+        return (x / peak).astype(np.float32) if peak > 0 else x
 
-    def _algorithmic_ir(
-        self,
-        sample_rate: int,
-        delay_ms: int,
-        decay: float,
-        room_size: float,
-        damping: float,
-    ) -> np.ndarray:
+    def _early_ir(self, sample_rate: int, delay_ms: int, decay: float, room_size: float) -> np.ndarray:
         base = max(1, int(sample_rate * delay_ms / 1000))
-        scale = 0.6 + 1.4 * room_size
-        early_delays = [base, int(base * 1.37 * scale), int(base * 1.91 * scale), int(base * 2.53 * scale)]
-        early_gains = [0.50 * decay, 0.38 * decay, 0.28 * decay, 0.20 * decay]
-        early_length = early_delays[-1] + 1
-        ir = np.zeros((early_length, 2), dtype=np.float32)
+        scale = 0.65 + 1.35 * room_size
+        reflections = (
+            (base, 0.50),
+            (max(1, int(base * 1.37 * scale)), 0.38),
+            (max(1, int(base * 1.91 * scale)), 0.28),
+            (max(1, int(base * 2.53 * scale)), 0.20),
+        )
+        length = max(index for index, _ in reflections) + 1
+        ir = np.zeros((length, 2), dtype=np.float32)
         ir[0] = 1.0
-        for index, gain in zip(early_delays, early_gains):
-            index = min(index, early_length - 1)
-            ir[index, 0] += gain * 0.92
-            ir[index, 1] += gain * 1.08
+        for index, gain in reflections:
+            ir[index, 0] += decay * gain * 0.92
+            ir[index, 1] += decay * gain * 1.08
+        return ir
 
-        comb_delays = [29, 37, 41, 43]
-        comb_delays = [max(1, int(sample_rate * d / 1000 * scale / 40.0)) for d in comb_delays]
-        comb_gains = [0.74 * decay, 0.70 * decay, 0.67 * decay, 0.63 * decay]
-        allpass_delay = max(1, int(sample_rate * 5.0 / 1000))
-        allpass_gain = min(0.7, 0.35 + 0.25 * decay)
-        length = max(early_length, max(comb_delays) + int(sample_rate * 1.2 * (0.4 + room_size)))
-        input_ir = np.zeros(length, dtype=np.float32)
-        input_ir[:early_length] = np.mean(ir, axis=1)
-        late = np.zeros(length, dtype=np.float32)
+    @staticmethod
+    def _comb_ir(length: int, delay: int, gain: float) -> np.ndarray:
         impulse = np.zeros(length, dtype=np.float32)
         impulse[0] = 1.0
-        for delay, gain in zip(comb_delays, comb_gains):
-            comb_ir = np.zeros(length, dtype=np.float32)
-            comb_ir[::delay] = gain ** np.arange(len(comb_ir[::delay]), dtype=np.float32)
-            late += lfilter([1.0], [1.0] + [-0.0] * (delay - 1) + [-gain], impulse)
-            late = np.maximum(late, 0.0) + fftconvolve(impulse, comb_ir, mode="same") * 0.15
-        alpha = min(0.95, max(0.05, 1.0 - damping * 0.85))
-        filtered = lfilter([1.0 - alpha], [1.0, -alpha], late)
-        ap = filtered.copy()
-        for n in range(allpass_delay, len(ap)):
-            ap[n] = -allpass_gain * ap[n - allpass_delay] + allpass_gain * filtered[n] + filtered[n - allpass_delay]
-        left = input_ir + 0.65 * ap
-        right = input_ir + 0.80 * ap
-        return np.column_stack((left, right)).astype(np.float32)
+        denominator = [1.0] + [0.0] * (delay - 1) + [-gain]
+        return lfilter([1.0], denominator, impulse).astype(np.float32)
+
+    @staticmethod
+    def _allpass(signal: np.ndarray, delay: int, gain: float) -> np.ndarray:
+        output = np.zeros_like(signal)
+        for index in range(len(signal)):
+            delayed_input = signal[index - delay] if index >= delay else 0.0
+            delayed_output = output[index - delay] if index >= delay else 0.0
+            output[index] = -gain * signal[index] + delayed_input + gain * delayed_output
+        return output
+
+    def _algorithmic_ir(self, sample_rate: int, delay_ms: int, decay: float, room_size: float, damping: float) -> np.ndarray:
+        early = self._early_ir(sample_rate, delay_ms, decay, room_size)
+        scale = 0.65 + 1.35 * room_size
+        delays_ms = (29.7, 37.1, 41.1, 43.7)
+        delays = [max(1, int(sample_rate * ms * scale / 1000)) for ms in delays_ms]
+        gains = [0.78, 0.73, 0.69, 0.65]
+        tail_seconds = 1.2 + 1.8 * room_size
+        length = max(len(early), int(sample_rate * tail_seconds))
+        late = np.zeros(length, dtype=np.float32)
+        for delay, gain in zip(delays, gains):
+            late += self._comb_ir(length, delay, gain * max(0.05, decay))
+        late /= max(len(delays), 1)
+        damping_alpha = min(0.995, max(0.05, 0.50 + 0.45 * damping))
+        late = lfilter([1.0 - damping_alpha], [1.0, -damping_alpha], late).astype(np.float32)
+        late = self._allpass(late, max(1, int(sample_rate * 5.0 / 1000)), min(0.7, 0.35 + 0.25 * decay))
+
+        ir = np.zeros((length, 2), dtype=np.float32)
+        ir[: len(early)] += early
+        ir[:, 0] += 0.70 * late
+        ir[:, 1] += 0.82 * late
+        return ir
 
     def process(
         self,
@@ -99,7 +102,7 @@ class RoomReverb:
         if dry.ndim != 2 or dry.shape[1] != 2:
             raise ValueError("RoomReverb expects stereo audio with shape (frames, 2).")
         if mix <= 0 or decay <= 0:
-            self.last_diagnostics = {"model": "disabled", "rt60_proxy_seconds": 0.0}
+            self.last_diagnostics = {"model": "disabled", "ir_duration_seconds": 0.0}
             return dry.copy()
 
         if self.room_ir_path:
@@ -113,15 +116,12 @@ class RoomReverb:
             ir = ir / peak
 
         wet = np.zeros((len(dry) + len(ir) - 1, 2), dtype=np.float32)
-        for out_channel in range(2):
-            ir_channel = ir[:, out_channel]
-            wet[:, out_channel] += fftconvolve(dry[:, out_channel], ir_channel, mode="full")
+        for channel in range(2):
+            wet[:, channel] = fftconvolve(dry[:, channel], ir[:, channel], mode="full")
         wet = wet[: len(dry)]
-        output = ((1.0 - mix) * dry + mix * wet).astype(np.float32)
         self.last_diagnostics = {
             "model": model,
             "ir_length_samples": int(len(ir)),
             "ir_duration_seconds": float(len(ir) / sample_rate),
-            "rt60_proxy_seconds": float(len(ir) / sample_rate * 0.65),
         }
-        return output
+        return ((1.0 - mix) * dry + mix * wet).astype(np.float32)
