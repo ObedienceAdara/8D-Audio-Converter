@@ -15,10 +15,10 @@ def test_synthetic_hrtf_is_directional_fir_convolution():
 
     impulse = np.zeros(1024, dtype=np.float32)
     impulse[0] = 1.0
-    left_output = HRTFConvolver(ir_length=128, block_size=128).process(
+    left_output = HRTFConvolver(ir_length=128, block_size=128, trajectory_smoothing=0.0).process(
         impulse, np.full(len(impulse), -90.0, dtype=np.float32), 48_000
     )
-    right_output = HRTFConvolver(ir_length=128, block_size=128).process(
+    right_output = HRTFConvolver(ir_length=128, block_size=128, trajectory_smoothing=0.0).process(
         impulse, np.full(len(impulse), 90.0, dtype=np.float32), 48_000
     )
 
@@ -49,6 +49,89 @@ def test_sofa_loader_accepts_two_receiver_hrir(tmp_path: Path):
     assert database.source.startswith("sofa:")
     selected = database.nearest_ir(90.0, 48_000)
     assert np.allclose(selected[1, :2], [1.0, 0.4])
+
+
+def test_spherical_interpolation_blends_neighboring_hrirs():
+    directions = np.array([[-30.0, 0.0], [30.0, 0.0]])
+    ir = np.zeros((2, 2, 16), dtype=np.float32)
+    ir[0, :, 2] = [1.0, 0.2]
+    ir[1, :, 2] = [0.2, 1.0]
+    database = HRTFDatabase(48_000, directions[:, 0], directions[:, 1], ir, "fixture")
+
+    midpoint = database.interpolate_ir(0.0, 0.0, 48_000, quality="spherical", neighbors=2)
+
+    assert midpoint.shape == (2, 16)
+    assert np.isclose(midpoint[0, 2], midpoint[1, 2], atol=1e-6)
+    assert midpoint[0, 2] > 0.55
+    assert midpoint[1, 2] > 0.55
+
+
+def test_bilinear_interpolation_uses_four_3d_grid_corners():
+    azimuths = np.array([-30.0, 30.0, -30.0, 30.0])
+    elevations = np.array([-30.0, -30.0, 30.0, 30.0])
+    ir = np.zeros((4, 2, 8), dtype=np.float32)
+    ir[:, 0, 1] = np.array([1.0, 3.0, 5.0, 7.0])
+    ir[:, 1, 1] = np.array([7.0, 5.0, 3.0, 1.0])
+    database = HRTFDatabase(48_000, azimuths, elevations, ir, "grid")
+
+    result = database.interpolate_ir(0.0, 0.0, 48_000, quality="bilinear", neighbors=4)
+
+    assert np.isclose(result[0, 1], 4.0, atol=1e-5)
+    assert np.isclose(result[1, 1], 4.0, atol=1e-5)
+
+
+def test_spherical_interpolation_wraps_continuously_at_azimuth_seam():
+    azimuths = np.array([-179.0, 179.0])
+    elevations = np.zeros(2)
+    ir = np.zeros((2, 2, 8), dtype=np.float32)
+    ir[0, :, 0] = [1.0, 0.3]
+    ir[1, :, 0] = [0.9, 0.4]
+    database = HRTFDatabase(48_000, azimuths, elevations, ir, "seam")
+
+    left = database.interpolate_ir(179.5, 0.0, 48_000, quality="spherical", neighbors=2)
+    right = database.interpolate_ir(-179.5, 0.0, 48_000, quality="spherical", neighbors=2)
+
+    assert np.allclose(left, right, atol=0.02)
+
+
+def test_hrtf_filter_crossfade_reduces_directional_jump():
+    convolver = HRTFConvolver(
+        ir_length=128,
+        block_size=128,
+        interpolation_quality="nearest",
+        filter_crossfade_blocks=2,
+        trajectory_smoothing=0.0,
+    )
+    first = convolver._interpolated_filter(-60.0, 0.0, 48_000)
+    second = convolver._interpolated_filter(60.0, 0.0, 48_000)
+    halfway = convolver._crossfade_filter(first, second, 0.5)
+
+    assert np.allclose(halfway, 0.5 * (first + second), atol=1e-7)
+    assert np.linalg.norm(halfway - first) < np.linalg.norm(second - first)
+    assert np.linalg.norm(halfway - second) < np.linalg.norm(second - first)
+
+
+def test_hrtf_trajectory_smoothing_is_wrap_aware():
+    convolver = HRTFConvolver(ir_length=128, trajectory_smoothing=0.5)
+    trajectory = np.array([179.0, -179.0, -178.0], dtype=np.float32)
+
+    smoothed = convolver._smooth_trajectory(trajectory)
+
+    step = np.abs(((smoothed[1:] - smoothed[:-1] + 180.0) % 360.0) - 180.0)
+    assert np.max(step) < 5.0
+
+
+def test_hrtf_process_accepts_elevation_trajectory():
+    convolver = HRTFConvolver(ir_length=128, block_size=64, trajectory_smoothing=0.0)
+    impulse = np.zeros(256, dtype=np.float32)
+    impulse[0] = 1.0
+    azimuth = np.zeros_like(impulse)
+    elevation = np.linspace(-30.0, 30.0, len(impulse), dtype=np.float32)
+
+    output = convolver.process(impulse, azimuth, 48_000, elevation)
+
+    assert output.shape == (256, 2)
+    assert np.isfinite(output).all()
 
 
 def test_room_model_has_reflections_and_late_tail():
