@@ -35,19 +35,31 @@ def _config_from_form(form) -> AudioProcessingConfig:
         "reverb_delay_ms": int,
         "reverb_decay": float,
         "reverb_mix": float,
+        "room_size": float,
+        "room_damping": float,
+        "room_model": str,
+        "room_ir_path": str,
         "target_rms_db": float,
         "limiter_db": float,
         "output_format": str,
         "output_bitrate": str,
         "max_duration_seconds": int,
         "room_enabled": _parse_bool,
+        "spatial_mode": str,
         "hrtf_enabled": _parse_bool,
+        "headphone_mode": _parse_bool,
+        "hrtf_source": str,
+        "hrtf_sofa_path": str,
     }
     for key, caster in casts.items():
         raw = form.get(key)
         if raw not in (None, ""):
             overrides[key] = caster(raw)
-    return replace(config, **overrides)
+    if overrides.get("room_ir_path") == "":
+        overrides["room_ir_path"] = None
+    if overrides.get("hrtf_sofa_path") == "":
+        overrides["hrtf_sofa_path"] = None
+    return replace(config, **overrides) if overrides else config
 
 
 def _filename_or_error(filename: str | None) -> tuple[str | None, str | None]:
@@ -65,6 +77,10 @@ def _job_payload(record: JobRecord, queue_depth: int) -> dict:
         body["download_url"] = f"/api/jobs/{record.id}/download"
         body["preview_url"] = f"/api/jobs/{record.id}/preview"
         body["waveform_url"] = f"/api/jobs/{record.id}/waveform"
+        if record.quality_report_path:
+            body["report_url"] = f"/api/jobs/{record.id}/report"
+        if record.quality_report_html_path:
+            body["report_html_url"] = f"/api/jobs/{record.id}/report.html"
     return body
 
 
@@ -98,41 +114,31 @@ def create_app(job_manager: JobManager | None = None) -> Flask:
         if filename_error:
             return jsonify({"error": filename_error}), 400
         try:
-            config = _config_from_form(request.form)
-            record = manager.submit(uploaded.stream, filename, config)
+            record = manager.submit(uploaded.stream, filename, _config_from_form(request.form))
         except QueueFullError as exc:
             return jsonify({"error": str(exc), "retry_after_seconds": 2}), 503
         except (TypeError, ValueError) as exc:
             return jsonify({"error": str(exc)}), 400
-        return jsonify({
-            "job": _job_payload(record, manager.queue_depth),
-            "status_url": f"/api/jobs/{record.id}",
-        }), 202
+        return jsonify({"job": _job_payload(record, manager.queue_depth), "status_url": f"/api/jobs/{record.id}"}), 202
 
     @app.post("/api/batches")
     def create_batch():
-        uploaded_files = request.files.getlist("files")
-        if not uploaded_files:
-            uploaded_files = request.files.getlist("file")
+        uploaded_files = request.files.getlist("files") or request.files.getlist("file")
         if not uploaded_files:
             return jsonify({"error": "No audio files uploaded."}), 400
-
         items = []
         for uploaded in uploaded_files:
             filename, filename_error = _filename_or_error(uploaded.filename)
             if filename_error:
                 return jsonify({"error": filename_error}), 400
             items.append((uploaded.stream, filename))
-
         try:
-            config = _config_from_form(request.form)
-            batch = manager.create_batch(items, config)
+            batch = manager.create_batch(items, _config_from_form(request.form))
         except QueueFullError as exc:
             return jsonify({"error": str(exc), "retry_after_seconds": 2}), 503
         except (TypeError, ValueError) as exc:
             return jsonify({"error": str(exc)}), 400
-        payload = manager.get_batch(batch.id)
-        return jsonify({"batch": payload, "status_url": f"/api/batches/{batch.id}"}), 202
+        return jsonify({"batch": manager.get_batch(batch.id), "status_url": f"/api/batches/{batch.id}"}), 202
 
     @app.get("/api/jobs/<job_id>")
     def get_job(job_id: str):
@@ -158,11 +164,7 @@ def create_app(job_manager: JobManager | None = None) -> Flask:
         output = Path(record.output_path)
         if not output.exists():
             return jsonify({"error": "Output artifact has expired."}), 410
-        return send_file(
-            output,
-            as_attachment=True,
-            download_name=f"{Path(record.filename).stem}_spatial.{output.suffix.lstrip('.')}",
-        )
+        return send_file(output, as_attachment=True, download_name=f"{Path(record.filename).stem}_spatial.{output.suffix.lstrip('.')}")
 
     @app.get("/api/jobs/<job_id>/preview")
     def preview_job(job_id: str):
@@ -184,6 +186,30 @@ def create_app(job_manager: JobManager | None = None) -> Flask:
         if record.status != "completed":
             return jsonify({"error": "Waveform is not ready."}), 409
         return jsonify({"waveform": record.waveform})
+
+    @app.get("/api/jobs/<job_id>/report")
+    def report_job(job_id: str):
+        record = manager.get(job_id)
+        if record is None:
+            return jsonify({"error": "Job not found."}), 404
+        if record.status != "completed" or not record.quality_report_path:
+            return jsonify({"error": "Quality report is not ready."}), 409
+        report = Path(record.quality_report_path)
+        if not report.exists():
+            return jsonify({"error": "Quality report has expired."}), 410
+        return send_file(report, mimetype="application/json", as_attachment=True, download_name=f"{job_id}.quality.json")
+
+    @app.get("/api/jobs/<job_id>/report.html")
+    def report_html_job(job_id: str):
+        record = manager.get(job_id)
+        if record is None:
+            return jsonify({"error": "Job not found."}), 404
+        if record.status != "completed" or not record.quality_report_html_path:
+            return jsonify({"error": "HTML quality report is not ready."}), 409
+        report = Path(record.quality_report_html_path)
+        if not report.exists():
+            return jsonify({"error": "HTML quality report has expired."}), 410
+        return send_file(report, mimetype="text/html", as_attachment=False)
 
     @app.errorhandler(RequestEntityTooLarge)
     def too_large(_exc):
