@@ -27,7 +27,7 @@ class HRTFDatabase:
             raise ValueError("HRTF sample rate must be positive.")
 
     @classmethod
-    def synthetic(cls, sample_rate: int = 48_000, ir_length: int = 256) -> "HRTFDatabase":
+    def synthetic(cls, sample_rate: int = 48_000, ir_length: int = 256) -> HRTFDatabase:
         """Build a deterministic convolutional headphone-oriented HRIR bank.
 
         This is an engineering fallback, not a measured human HRTF dataset.
@@ -44,8 +44,8 @@ class HRTFDatabase:
             lateral = float(np.sin(np.deg2rad(azimuth)))
             itd = max_itd * lateral
             delays = (
-                max(0, int(round(-min(itd, 0.0) * sample_rate))),
-                max(0, int(round(max(itd, 0.0) * sample_rate))),
+                max(0, round(-min(itd, 0.0) * sample_rate)),
+                max(0, round(max(itd, 0.0) * sample_rate)),
             )
             shadow = 10.0 ** (-(1.5 + 9.0 * abs(lateral)) / 20.0)
             for ear, delay, near in ((0, delays[0], azimuth <= 0), (1, delays[1], azimuth >= 0)):
@@ -62,7 +62,7 @@ class HRTFDatabase:
         return cls(sample_rate, azimuths, np.zeros_like(azimuths), ir, "synthetic")
 
     @classmethod
-    def from_sofa(cls, path: str | Path) -> "HRTFDatabase":
+    def from_sofa(cls, path: str | Path) -> HRTFDatabase:
         """Load a measured SOFA SimpleFreeFieldHRIR/FreeFieldHRIR file."""
         try:
             import h5py
@@ -78,7 +78,7 @@ class HRTFDatabase:
                 raise ValueError(f"SOFA file is missing datasets: {missing}")
             ir = np.asarray(sofa["Data.IR"], dtype=np.float32)
             positions = np.asarray(sofa["SourcePosition"], dtype=np.float64)
-            sample_rate = int(round(float(np.asarray(sofa["Data.SamplingRate"])[0])))
+            sample_rate = round(float(np.asarray(sofa["Data.SamplingRate"])[0]))
             convention = sofa.attrs.get("SOFAConventions", b"")
             if isinstance(convention, bytes):
                 convention = convention.decode("utf-8", errors="ignore")
