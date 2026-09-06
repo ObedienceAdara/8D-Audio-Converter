@@ -22,6 +22,8 @@ class JobRecord:
     output_path: str | None = None
     metrics: dict | None = None
     waveform: list[float] = field(default_factory=list)
+    quality_report_path: str | None = None
+    quality_report_html_path: str | None = None
     error: str | None = None
     progress: int = 0
     stage: str = "queued"
@@ -44,6 +46,8 @@ class JobRecord:
             "output_format": self.output_format,
             "metrics": self.metrics or {},
             "waveform": self.waveform,
+            "quality_report_path": self.quality_report_path,
+            "quality_report_html_path": self.quality_report_html_path,
             "progress": self.progress,
             "stage": self.stage,
             "error": self.error,
@@ -60,14 +64,7 @@ class BatchRecord:
 class JobManager:
     """Coordinate API submissions, a bounded queue, dedicated workers, and storage."""
 
-    def __init__(
-        self,
-        pipeline: AudioPipeline | None = None,
-        storage: LocalStorage | None = None,
-        max_workers: int = 2,
-        queue_size: int = 64,
-        queue: InProcessJobQueue[ConversionTask] | None = None,
-    ) -> None:
+    def __init__(self, pipeline: AudioPipeline | None = None, storage: LocalStorage | None = None, max_workers: int = 2, queue_size: int = 64, queue: InProcessJobQueue[ConversionTask] | None = None) -> None:
         if max_workers <= 0:
             raise ValueError("max_workers must be positive")
         self.pipeline = pipeline or AudioPipeline()
@@ -91,13 +88,7 @@ class JobManager:
     def active_workers(self) -> int:
         return sum(worker.alive for worker in self.workers)
 
-    def submit(
-        self,
-        stream: BinaryIO,
-        filename: str,
-        config: AudioProcessingConfig,
-        batch_id: str | None = None,
-    ) -> JobRecord:
+    def submit(self, stream: BinaryIO, filename: str, config: AudioProcessingConfig, batch_id: str | None = None) -> JobRecord:
         job_id = uuid.uuid4().hex
         source_path = self.storage.stage_upload(stream, filename)
         output_path = self.storage.output_path(job_id, config.output_format)
@@ -121,21 +112,13 @@ class JobManager:
             raise
         return record
 
-    def create_batch(
-        self,
-        items: list[tuple[BinaryIO, str]],
-        config: AudioProcessingConfig,
-    ) -> BatchRecord:
+    def create_batch(self, items: list[tuple[BinaryIO, str]], config: AudioProcessingConfig) -> BatchRecord:
         if not items:
             raise ValueError("batch must contain at least one file")
         available = self.queue.maxsize - self.queue.qsize()
         if len(items) > available:
             raise QueueFullError("Batch exceeds currently available queue capacity.")
-        batch = BatchRecord(
-            id=uuid.uuid4().hex,
-            created_at=datetime.now(UTC).isoformat(),
-            job_ids=[],
-        )
+        batch = BatchRecord(id=uuid.uuid4().hex, created_at=datetime.now(UTC).isoformat(), job_ids=[])
         with self.lock:
             self.batches[batch.id] = batch
         try:
@@ -165,25 +148,25 @@ class JobManager:
             record.started_at = datetime.now(UTC).isoformat()
             record.stage = "Starting worker"
             record.progress = 1
-
         try:
             callback = lambda progress, stage: self._set_progress(record, progress, stage)
-            artifacts = self.pipeline.run(
-                task.source_path,
-                task.output_path,
-                task.config,
-                progress_callback=callback,
-            )
+            artifacts = self.pipeline.run(task.source_path, task.output_path, task.config, progress_callback=callback)
             with self.lock:
                 record.output_path = artifacts.output_path
                 record.metrics = artifacts.metrics
                 record.waveform = artifacts.waveform
+                record.quality_report_path = artifacts.quality_report_path
+                record.quality_report_html_path = artifacts.quality_report_html_path
                 record.progress = 100
                 record.stage = "Complete"
                 record.status = "completed"
                 record.completed_at = datetime.now(UTC).isoformat()
             self.storage.schedule_remove(artifacts.output_path)
-        except Exception as exc:  # noqa: BLE001 - worker boundary must capture pipeline failures
+            if artifacts.quality_report_path:
+                self.storage.schedule_remove(artifacts.quality_report_path)
+            if artifacts.quality_report_html_path:
+                self.storage.schedule_remove(artifacts.quality_report_html_path)
+        except Exception as exc:  # noqa: BLE001
             with self.lock:
                 record.error = str(exc)
                 record.status = "failed"
