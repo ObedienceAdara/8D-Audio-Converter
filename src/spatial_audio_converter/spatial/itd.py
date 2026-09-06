@@ -4,7 +4,11 @@ import numpy as np
 
 
 class InterauralTimeDifference:
-    """Integer-sample ITD model with a bounded maximum acoustic delay."""
+    """Time-varying integer-sample ITD model.
+
+    Positive azimuth means source-right, so the left ear receives the delayed
+    path. Negative azimuth means source-left, so the right ear is delayed.
+    """
 
     def __init__(self, max_delay_seconds: float = 0.00065) -> None:
         if max_delay_seconds < 0:
@@ -22,13 +26,15 @@ class InterauralTimeDifference:
         return left, right
 
     @staticmethod
-    def _delay_channel(signal: np.ndarray, delay_samples: int) -> np.ndarray:
-        signal = np.asarray(signal, dtype=np.float32).reshape(-1)
-        if delay_samples <= 0:
-            return signal.copy()
-        output = np.zeros_like(signal)
-        if delay_samples < len(signal):
-            output[delay_samples:] = signal[:-delay_samples]
+    def _apply_time_varying_delay(signal: np.ndarray, delays: np.ndarray) -> np.ndarray:
+        source = np.asarray(signal, dtype=np.float32).reshape(-1)
+        delay = np.asarray(delays, dtype=np.int32).reshape(-1)
+        if len(source) != len(delay):
+            raise ValueError("Delay trajectory length must match signal length.")
+        indices = np.arange(len(source), dtype=np.int64) - delay.astype(np.int64)
+        valid = indices >= 0
+        output = np.zeros_like(source)
+        output[valid] = source[indices[valid]]
         return output
 
     def apply(
@@ -42,15 +48,10 @@ class InterauralTimeDifference:
             raise ValueError("ITD processing requires stereo audio with shape (frames, 2).")
         left_delay, right_delay = self.delays(azimuth_deg, sample_rate)
         if np.ndim(left_delay) == 0:
-            left_samples = int(left_delay)
-            right_samples = int(right_delay)
-        else:
-            left_samples = int(np.max(left_delay))
-            right_samples = int(np.max(right_delay))
-        output = np.column_stack(
-            (
-                self._delay_channel(audio[:, 0], left_samples),
-                self._delay_channel(audio[:, 1], right_samples),
-            )
-        )
-        return output.astype(np.float32)
+            left_delay = np.full(len(audio), int(left_delay), dtype=np.int32)
+            right_delay = np.full(len(audio), int(right_delay), dtype=np.int32)
+        elif len(left_delay) != len(audio):
+            raise ValueError("Azimuth trajectory length must match stereo frame count.")
+        left = self._apply_time_varying_delay(audio[:, 0], left_delay)
+        right = self._apply_time_varying_delay(audio[:, 1], right_delay)
+        return np.column_stack((left, right)).astype(np.float32)
