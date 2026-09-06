@@ -1,7 +1,9 @@
 from pathlib import Path
+import shutil
 import wave
 
 import numpy as np
+import pytest
 
 from spatial_audio_converter.audio.decoder import AudioDecoder
 from spatial_audio_converter.config import AudioProcessingConfig
@@ -22,18 +24,21 @@ def _write_test_wav(path: Path, sample_rate: int = 8000, duration: float = 0.25)
         wav.writeframes(pcm.tobytes())
 
 
+def _config(output_format: str) -> AudioProcessingConfig:
+    return AudioProcessingConfig(
+        output_format=output_format,
+        room_enabled=False,
+        hrtf_enabled=False,
+        max_duration_seconds=10,
+    )
+
+
 def test_end_to_end_wav_conversion(tmp_path: Path):
     input_path = tmp_path / "input.wav"
     output_path = tmp_path / "output.wav"
     _write_test_wav(input_path)
 
-    config = AudioProcessingConfig(
-        output_format="wav",
-        room_enabled=False,
-        hrtf_enabled=False,
-        max_duration_seconds=10,
-    )
-    artifacts = AudioPipeline().run(input_path, output_path, config)
+    artifacts = AudioPipeline().run(input_path, output_path, _config("wav"))
 
     assert output_path.exists()
     assert Path(artifacts.output_path) == output_path
@@ -44,4 +49,21 @@ def test_end_to_end_wav_conversion(tmp_path: Path):
     assert decoded.channels == 2
     assert decoded.sample_rate == 8000
     assert decoded.frames == int(8000 * 0.25)
+    assert np.isfinite(decoded.samples).all()
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="FFmpeg is required for MP3 integration test")
+def test_end_to_end_mp3_conversion(tmp_path: Path):
+    input_path = tmp_path / "input.wav"
+    output_path = tmp_path / "output.mp3"
+    _write_test_wav(input_path)
+
+    artifacts = AudioPipeline().run(input_path, output_path, _config("mp3"))
+
+    assert output_path.exists()
+    assert Path(artifacts.output_path) == output_path
+    assert output_path.stat().st_size > 0
+    decoded = AudioDecoder().decode(output_path, max_duration_seconds=10)
+    assert decoded.channels == 2
+    assert decoded.frames > 0
     assert np.isfinite(decoded.samples).all()
