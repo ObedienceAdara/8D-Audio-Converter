@@ -43,12 +43,13 @@ def main() -> None:
         started = time.perf_counter()
         artifacts = AudioPipeline().run(input_path, output_path, config)
         elapsed = time.perf_counter() - started
+        output_bytes = output_path.stat().st_size
 
     print(json.dumps({
         "duration_seconds": args.duration,
         "elapsed_seconds": round(elapsed, 6),
         "realtime_factor": round(args.duration / elapsed, 3) if elapsed else None,
-        "output_bytes": output_path.stat().st_size if output_path.exists() else 0,
+        "output_bytes": output_bytes,
         "renderer": artifacts.metrics.get("renderer"),
     }, indent=2))
 
