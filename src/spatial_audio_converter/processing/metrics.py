@@ -19,8 +19,8 @@ class QualityMetrics:
             {
                 "stereo_correlation": self._stereo_correlation(after),
                 "clipped_samples": int(np.count_nonzero(np.abs(after) >= 0.99999)),
-                "input_frames": int(len(before)),
-                "output_frames": int(len(after)),
+                "input_frames": len(before),
+                "output_frames": len(after),
                 "snr_db": comparison.get("snr_db"),
                 "downmix_snr_db": comparison.get("downmix_snr_db"),
                 "spectral_distance_rmse_db": comparison.get("spectral_distance_rmse_db"),
