@@ -11,14 +11,30 @@ from .trajectory import TrajectoryGenerator
 
 
 class SpatialEngine:
-    """Compose trajectory, panning, ILD/ITD, and optional analytic HRTF."""
+    """Compose spatial motion, legacy stereo mode, and binaural HRTF rendering."""
 
-    def __init__(self, block_size: int = 4096, hrtf_ir_length: int = 96) -> None:
+    def __init__(self, block_size: int = 1024, hrtf_ir_length: int = 256, hrtf_path: str | None = None) -> None:
         self.trajectory = TrajectoryGenerator()
         self.panner = EqualPowerPanner()
         self.ild = InterauralLevelDifference()
         self.itd = InterauralTimeDifference()
-        self.hrtf = HRTFConvolver(ir_length=hrtf_ir_length, block_size=block_size, ild=self.ild, itd=self.itd)
+        self._block_size = block_size
+        self._hrtf_ir_length = hrtf_ir_length
+        self._hrtf_cache: dict[str | None, HRTFConvolver] = {}
+        self._hrtf_cache[hrtf_path] = HRTFConvolver(ir_length=hrtf_ir_length, block_size=block_size, hrtf_path=hrtf_path)
+
+    def _get_hrtf(self, hrtf_path: str | None) -> HRTFConvolver:
+        if hrtf_path not in self._hrtf_cache:
+            self._hrtf_cache[hrtf_path] = HRTFConvolver(
+                ir_length=self._hrtf_ir_length,
+                block_size=self._block_size,
+                hrtf_path=hrtf_path,
+            )
+        return self._hrtf_cache[hrtf_path]
+
+    @property
+    def hrtf_source(self) -> str:
+        return next(iter(self._hrtf_cache.values())).source
 
     def process(
         self,
@@ -26,20 +42,17 @@ class SpatialEngine:
         speed_hz: float,
         depth: float,
         use_hrtf: bool = False,
+        headphone_mode: bool = False,
+        hrtf_path: str | None = None,
     ) -> AudioBuffer:
-        if audio.channels == 1:
-            mono = audio.samples[:, 0]
-        else:
-            mono = np.mean(audio.samples[:, :2], axis=1)
+        mono = audio.samples[:, 0] if audio.channels == 1 else np.mean(audio.samples[:, :2], axis=1)
         azimuth = self.trajectory.generate(audio.frames, audio.sample_rate, speed_hz, depth)
-
-        if use_hrtf:
-            output = self.hrtf.process(mono, azimuth, audio.sample_rate)
+        if use_hrtf or headphone_mode:
+            output = self._get_hrtf(hrtf_path).process(mono, azimuth, audio.sample_rate)
         else:
             stereo = self.panner.pan(mono, azimuth)
             left_gain, right_gain = self.ild.gains(azimuth)
             stereo[:, 0] *= left_gain
             stereo[:, 1] *= right_gain
             output = self.itd.apply(stereo, azimuth, audio.sample_rate)
-
         return AudioBuffer(output, audio.sample_rate, audio.metadata)
