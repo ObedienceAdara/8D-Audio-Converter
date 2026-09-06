@@ -1,6 +1,0 @@
-flask==3.0.0
-werkzeug==3.0.1
-numpy>=1.26.0,<2.0.0
-scipy>=1.11.0
-pydub==0.25.1
-gunicorn==21.2.0

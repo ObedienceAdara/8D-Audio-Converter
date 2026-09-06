@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'refactor/**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install project
+        run: pip install -e ".[test,tools]"
+      - name: Lint
+        run: ruff check .
+      - name: Test
+        run: pytest -q

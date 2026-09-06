@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spatial-audio-converter"
+version = "1.0.0"
+description = "A modular Python web service for spatial/8D-style audio processing."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = { file = "LICENSE" }
+dependencies = [
+  "Flask>=3.0,<4",
+  "Gunicorn>=21,<24",
+  "NumPy>=1.26,<3",
+  "SciPy>=1.11,<2",
+  "pydub>=0.25,<1",
+  "Werkzeug>=3.0,<4",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8,<9",
+]
+tools = [
+  "ruff>=0.6,<1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
