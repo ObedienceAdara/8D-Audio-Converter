@@ -36,8 +36,6 @@ class FakeJobManager:
     def __init__(self, status="queued", output_path=None, report_path=None):
         self.record = FakeRecord(status=status, output_path=output_path, report_path=report_path)
         self.config = None
-        self.queue_depth = 0
-        self.active_workers = 1
 
     def submit(self, _stream, filename, config):
         self.record.filename = filename
@@ -52,7 +50,7 @@ def test_health_endpoint():
     app = create_app(FakeJobManager())
     response = app.test_client().get("/health")
     assert response.status_code == 200
-    assert response.get_json() == {"status": "ok", "queue_depth": 0, "workers": 1}
+    assert response.get_json() == {"status": "ok"}
 
 
 def test_home_page_renders():
