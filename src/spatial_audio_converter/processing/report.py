@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def write_quality_report(report: dict, output_path: str | Path) -> str:
-    """Persist JSON and a small human-readable HTML quality report."""
+    """Persist the machine-readable quality report."""
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(report, indent=2, allow_nan=False), encoding="utf-8")
@@ -14,6 +14,7 @@ def write_quality_report(report: dict, output_path: str | Path) -> str:
 
 
 def write_quality_html(report: dict, output_path: str | Path) -> str:
+    """Persist a small self-contained before/after HTML report."""
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     context = report.get("context", {})
@@ -28,6 +29,8 @@ def write_quality_html(report: dict, output_path: str | Path) -> str:
         ("Crest factor dB", before.get("crest_factor_db"), after.get("crest_factor_db")),
         ("Spectral centroid Hz", before.get("spectral", {}).get("spectral_centroid_hz"), after.get("spectral", {}).get("spectral_centroid_hz")),
         ("Spectral rolloff Hz", before.get("spectral", {}).get("spectral_rolloff_hz"), after.get("spectral", {}).get("spectral_rolloff_hz")),
+        ("Spectral RMSE dB", "—", comparison.get("spectral_distance_rmse_db")),
+        ("Downmix SNR dB", "—", comparison.get("downmix_snr_db")),
     ]
     table = "".join(
         f"<tr><td>{html.escape(str(label))}</td><td>{html.escape(str(left))}</td><td>{html.escape(str(right))}</td></tr>"
@@ -36,7 +39,8 @@ def write_quality_html(report: dict, output_path: str | Path) -> str:
     destination.write_text(
         "<html><head><meta charset='utf-8'><title>Spatial Audio Quality Report</title>"
         "<style>body{font-family:system-ui,sans-serif;max-width:960px;margin:40px auto;padding:0 20px}"
-        "table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:8px;text-align:left}pre{white-space:pre-wrap;background:#f5f5f5;padding:12px}</style></head><body>"
+        "table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:8px;text-align:left}"
+        "pre{white-space:pre-wrap;background:#f5f5f5;padding:12px}</style></head><body>"
         f"<h1>Spatial Audio Quality Report</h1><p>Context: {html.escape(json.dumps(context))}</p>"
         "<table><thead><tr><th>Metric</th><th>Before</th><th>After</th></tr></thead>"
         f"<tbody>{table}</tbody></table>"
